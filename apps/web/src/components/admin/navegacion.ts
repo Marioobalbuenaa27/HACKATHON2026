@@ -6,7 +6,7 @@ export interface ItemNav {
   label: string;
   icono: string;
   /** Grupo para agrupar en la barra lateral. */
-  grupo: "General" | "Catálogos" | "Administración";
+  grupo: "General" | "Catálogos" | "Agendas" | "Administración";
 }
 
 export const NAV: ItemNav[] = [
@@ -47,10 +47,45 @@ export const NAV: ItemNav[] = [
     grupo: "Catálogos",
   },
   {
+    seccion: "franjas",
+    href: "/admin/franjas",
+    label: "Franjas de agenda",
+    icono: "calendar_month",
+    grupo: "Agendas",
+  },
+  {
+    seccion: "excepciones",
+    href: "/admin/excepciones",
+    label: "Excepciones",
+    icono: "event_busy",
+    grupo: "Agendas",
+  },
+  {
+    seccion: "slots",
+    href: "/admin/slots",
+    label: "Slots generados",
+    icono: "grid_view",
+    grupo: "Agendas",
+  },
+  {
     seccion: "usuarios",
     href: "/admin/usuarios",
     label: "Usuarios del panel",
     icono: "group",
+    grupo: "Administración",
+  },
+  {
+    seccion: "parametros",
+    href: "/admin/parametros",
+    label: "Parámetros del sistema",
+    icono: "tune",
+    grupo: "Administración",
+  },
+  {
+    seccion: "auditoria",
+    href: "/admin/auditoria",
+    label: "Auditoría",
+    icono: "history",
     grupo: "Administración",
   },
 ];

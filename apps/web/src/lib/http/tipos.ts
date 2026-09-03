@@ -110,3 +110,181 @@ export const ETIQUETA_PRIORIDAD: Record<PrioridadBase, string> = {
   PREFERENCIAL: "Preferencial (nivel 2)",
   PRIORITARIO: "Prioritario (nivel 3)",
 };
+
+// --- Agendas: franjas y excepciones ---
+
+export type DiaSemana =
+  | "LUNES"
+  | "MARTES"
+  | "MIERCOLES"
+  | "JUEVES"
+  | "VIERNES"
+  | "SABADO"
+  | "DOMINGO";
+
+export const DIAS_SEMANA: DiaSemana[] = [
+  "LUNES",
+  "MARTES",
+  "MIERCOLES",
+  "JUEVES",
+  "VIERNES",
+  "SABADO",
+  "DOMINGO",
+];
+
+export const ETIQUETA_DIA: Record<DiaSemana, string> = {
+  LUNES: "Lunes",
+  MARTES: "Martes",
+  MIERCOLES: "Miércoles",
+  JUEVES: "Jueves",
+  VIERNES: "Viernes",
+  SABADO: "Sábado",
+  DOMINGO: "Domingo",
+};
+
+export interface FranjaAgenda {
+  id: string;
+  profesionalId: string;
+  diaSemana: DiaSemana;
+  horaInicio: string;
+  horaFin: string;
+  especialidadId: string;
+  salaId: string;
+  vigenciaDesde: string;
+  vigenciaHasta: string | null;
+  activa: boolean;
+  inconsistente: boolean;
+}
+
+export type TipoExcepcion = "BLOQUEO" | "APERTURA";
+
+export const ETIQUETA_TIPO_EXCEPCION: Record<TipoExcepcion, string> = {
+  BLOQUEO: "Bloqueo",
+  APERTURA: "Apertura",
+};
+
+export interface ExcepcionAgenda {
+  id: string;
+  profesionalId: string;
+  fecha: string;
+  tipo: TipoExcepcion;
+  horaInicio: string | null;
+  horaFin: string | null;
+  especialidadId: string | null;
+  salaId: string | null;
+  motivo: string;
+}
+
+// --- Slots ---
+
+export type EstadoSlot = "DISPONIBLE" | "BLOQUEADO";
+
+export interface Slot {
+  id: string;
+  profesionalId: string;
+  especialidadId: string;
+  salaId: string;
+  fecha: string;
+  horaInicio: string;
+  horaFin: string;
+  inicioUtc: string;
+  finUtc: string;
+  estado: EstadoSlot;
+  origen: "FRANJA" | "APERTURA";
+  origenId: string;
+  huerfano: boolean;
+}
+
+export interface GenerarSlotsResultado {
+  profesionales: number;
+  creados: number;
+  eliminados: number;
+  sinCambios: number;
+  franjasInconsistentesOmitidas: string[];
+  corridaId: string;
+}
+
+// --- Parámetros del sistema ---
+
+export type ClaveParametro =
+  | "ventana_reserva_dias"
+  | "antelacion_minima_horas"
+  | "reserva_temporal_minutos"
+  | "ventana_generacion_dias"
+  | "retencion_datos_meses";
+
+export type Parametros = Record<ClaveParametro, number>;
+
+export interface MetaParametro {
+  clave: ClaveParametro;
+  etiqueta: string;
+  descripcion: string;
+  unidad: string;
+  min: number;
+  max: number;
+}
+
+export const META_PARAMETROS: MetaParametro[] = [
+  {
+    clave: "ventana_reserva_dias",
+    etiqueta: "Ventana de reserva",
+    descripcion: "Con cuántos días de anticipación puede el ciudadano sacar un turno.",
+    unidad: "días",
+    min: 1,
+    max: 90,
+  },
+  {
+    clave: "antelacion_minima_horas",
+    etiqueta: "Antelación mínima",
+    descripcion: "Horas mínimas antes del turno para poder reservarlo online.",
+    unidad: "horas",
+    min: 0,
+    max: 72,
+  },
+  {
+    clave: "reserva_temporal_minutos",
+    etiqueta: "Reserva temporal",
+    descripcion: "Cuánto se retiene un slot mientras se completan los datos del turno.",
+    unidad: "minutos",
+    min: 1,
+    max: 30,
+  },
+  {
+    clave: "ventana_generacion_dias",
+    etiqueta: "Ventana de generación",
+    descripcion: "Cuántos días hacia adelante se generan slots. Debe ser ≥ la ventana de reserva.",
+    unidad: "días",
+    min: 7,
+    max: 120,
+  },
+  {
+    clave: "retencion_datos_meses",
+    etiqueta: "Retención de datos",
+    descripcion: "Meses que se conservan los datos personales de un turno antes de anonimizar.",
+    unidad: "meses",
+    min: 1,
+    max: 120,
+  },
+];
+
+// --- Auditoría ---
+
+export interface RegistroAuditoria {
+  id: string;
+  actorId: string;
+  actorNombre: string;
+  accion: string;
+  entidad: string;
+  entidadId: string;
+  motivo: string | null;
+  antes: unknown;
+  despues: unknown;
+  timestamp: string;
+}
+
+export const ENTIDADES_AUDITABLES = [
+  "usuario",
+  "franja",
+  "excepcion",
+  "parametros",
+] as const;
