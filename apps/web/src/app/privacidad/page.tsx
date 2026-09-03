@@ -1,0 +1,3 @@
+import Link from "next/link";
+
+export default function PrivacidadPage() { return <main className="mx-auto max-w-2xl px-margin-mobile py-space-2xl"><Link href="/turnos" className="text-primary">Volver a turnos</Link><h1 className="mt-space-lg text-headline-lg">Consentimiento y privacidad</h1><p className="mt-space-md text-body-md">Usamos los datos del paciente y del responsable únicamente para gestionar el turno, contactarte si ocurre una reprogramación y cumplir obligaciones del servicio. Conservamos los datos durante el plazo configurado por el hospital y luego los eliminamos o anonimizamos.</p></main>; }

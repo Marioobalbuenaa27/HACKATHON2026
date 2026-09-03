@@ -226,6 +226,23 @@ export const crearAusenciaSchema = z.object({ profesionalId: z.string().min(1), 
 export const desplazarTurnoSchema = z.object({ slotDestinoId: z.string().min(1), motivo: z.string().trim().min(1).max(280) });
 export const resolverCasoSchema = z.object({ slotDestinoId: z.string().min(1), motivo: z.string().trim().min(1).max(280) });
 
+// --- Canal ciudadano (Fase 3) ---
+export const reservarSlotSchema = z.object({
+  slotId: z.string().min(1),
+  categoriaId: z.string().min(1),
+  paciente: personaSchema.extend({ fechaNacimiento: zFecha }),
+  responsable: z.object({
+    nombre: z.string().trim().min(1).max(160),
+    dni: z.string().regex(/^\d{7,9}$/),
+    vinculo: z.string().trim().min(1).max(80),
+    telefono: z.string().trim().max(32).optional(),
+    email: z.string().email().optional(),
+  }),
+  consentimientoVersion: z.string().trim().min(1).max(40),
+});
+export const confirmarReservaSchema = z.object({ token: z.string().min(20).max(200) });
+export const consultarTurnoSchema = z.object({ dni: z.string().regex(/^\d{7,9}$/), fechaNacimiento: zFecha });
+
 // --- Parámetros ---
 export const PARAMETRO_RANGOS = {
   ventana_reserva_dias: [1, 90],

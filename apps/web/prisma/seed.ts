@@ -209,6 +209,35 @@ export async function sembrar() {
     }
   }
 
+  // Paciente demo para validar el portal público y los contadores del panel.
+  const categoriaDemo = await db.categoriaProblema.findFirst({ where: { nombre: "Control de niño sano" } });
+  const salaDemo = salas[0];
+  if (categoriaDemo && primerPediatra && salaDemo) {
+    const fechaDemo = new Date();
+    const inicioDemo = new Date(Date.UTC(fechaDemo.getUTCFullYear(), fechaDemo.getUTCMonth(), fechaDemo.getUTCDate()));
+    const existeDemo = await db.turno.findFirst({ where: { pacienteDni: "40123456", pacienteNacimiento: new Date("2020-05-12T00:00:00.000Z"), fecha: inicioDemo } });
+    if (!existeDemo) {
+      await db.turno.create({
+        data: {
+          profesionalId: primerPediatra.id,
+          especialidadId: pediatriaId,
+          salaId: salaDemo.id,
+          categoriaId: categoriaDemo.id,
+          fecha: inicioDemo,
+          horaProgramada: "09:00",
+          pacienteNombre: "Paciente Demo",
+          pacienteDni: "40123456",
+          pacienteNacimiento: new Date("2020-05-12T00:00:00.000Z"),
+          responsableNombre: "Responsable Demo",
+          responsableDni: "30123456",
+          responsableVinculo: "Madre/padre",
+          telefono: "1123456789",
+          email: "paciente.demo@localhost.test",
+        },
+      });
+    }
+  }
+
   // --- Franjas de agenda para >= la mitad de los profesionales (FR-47) ---
   const dias: DiaSemana[] = [DiaSemana.LUNES, DiaSemana.MARTES, DiaSemana.MIERCOLES, DiaSemana.JUEVES, DiaSemana.VIERNES];
   const vigenciaDesde = new Date(Date.UTC(new Date().getUTCFullYear(), 0, 1));

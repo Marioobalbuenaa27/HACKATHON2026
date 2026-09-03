@@ -55,6 +55,7 @@ enum TipoExcepcion {
 
 enum EstadoSlot {
   DISPONIBLE
+  RESERVADO_TEMPORAL
   BLOQUEADO
   OCUPADO
   // Fase 2/3 añaden RESERVADO_TEMPORAL, OCUPADO
@@ -229,6 +230,7 @@ model CategoriaProblema {
   especialidades CategoriaEspecialidad[]
   turnos         Turno[]
   demandas       DemandaEspontanea[]
+  reservas       ReservaTemporal[]
 
   @@index([orden])
   @@map("categoria_problema")
@@ -335,6 +337,8 @@ model Slot {
   origen         OrigenSlot
   origenId       String
   huerfano       Boolean    @default(false)
+  reservadoHasta DateTime?
+  reservaToken   String?    @unique
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
@@ -342,6 +346,7 @@ model Slot {
   especialidad Especialidad @relation(fields: [especialidadId], references: [id])
   sala         Sala         @relation(fields: [salaId], references: [id])
   turno        Turno?
+    reserva      ReservaTemporal?
   // `origenId` es polimórfico (FranjaAgenda | ExcepcionAgenda según `origen`).
   // Prisma no soporta relaciones polimórficas: se resuelve en la capa de aplicación.
 
@@ -374,6 +379,8 @@ model Turno {
   responsableVinculo    String             @db.VarChar(80)
   telefono              String?            @db.VarChar(32)
   email                 String?            @db.VarChar(254)
+    consentimientoAceptadoAt DateTime?
+    consentimientoVersion   String?          @db.VarChar(40)
   presenteAt            DateTime?
   ausenteAt             DateTime?
   atendidoAt            DateTime?
@@ -394,6 +401,31 @@ model Turno {
   @@index([profesionalId, fecha])
   @@index([pacienteDni, especialidadId, estado])
   @@map("turno")
+}
+
+/// Reserva ciudadana pendiente de confirmación. Se elimina al confirmar o expirar.
+model ReservaTemporal {
+  id                    String   @id @default(cuid())
+  slotId                String   @unique
+  token                 String   @unique
+  expiraAt              DateTime
+  categoriaId           String
+  pacienteNombre        String   @db.VarChar(160)
+  pacienteDni           String   @db.VarChar(16)
+  pacienteNacimiento    DateTime @db.Date
+  responsableNombre     String   @db.VarChar(160)
+  responsableDni        String?  @db.VarChar(16)
+  responsableVinculo    String   @db.VarChar(80)
+  telefono              String?  @db.VarChar(32)
+  email                 String?  @db.VarChar(254)
+  consentimientoVersion String   @db.VarChar(40)
+  creadoAt              DateTime @default(now())
+
+  slot      Slot              @relation(fields: [slotId], references: [id], onDelete: Cascade)
+  categoria CategoriaProblema @relation(fields: [categoriaId], references: [id])
+
+  @@index([expiraAt])
+  @@map("reserva_temporal")
 }
 
 model DemandaEspontanea {
