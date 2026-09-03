@@ -1,0 +1,20 @@
+{
+  "name": "turnero-jp",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Sistema de turnos para hospital pediátrico público — monorepo",
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm --filter web dev",
+    "build": "pnpm --filter web build",
+    "test": "pnpm --filter web test",
+    "db:up": "docker compose up -d db",
+    "db:down": "docker compose down",
+    "db:migrate": "pnpm --filter web prisma migrate dev",
+    "db:seed": "pnpm --filter web prisma db seed",
+    "db:studio": "pnpm --filter web prisma studio"
+  }
+}
