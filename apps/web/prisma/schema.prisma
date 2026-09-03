@@ -14,6 +14,11 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// Base de datos: PostgreSQL gestionado en Supabase.
+// - DATABASE_URL -> pooler de Supabase (PgBouncer, puerto 6543, `?pgbouncer=true`).
+//   Lo usa el cliente Prisma en runtime.
+// - DIRECT_URL   -> conexión directa (puerto 5432). La usan `prisma migrate` y
+//   `prisma db push`, que no funcionan a través del pooler transaccional.
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")

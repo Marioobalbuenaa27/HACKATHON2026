@@ -18,7 +18,8 @@ Panel administrativo + formulario ciudadano web + bot de WhatsApp, sobre un back
 ## Stack
 
 Monorepo pnpm. Una app Next.js (App Router, TS, Tailwind v4) para panel + formulario.
-PostgreSQL + Prisma. Auth.js (NextAuth v5, provider Credentials, JWT). Tests con Vitest.
+PostgreSQL gestionado en Supabase, gestionado desde la app con Prisma.
+Auth.js (NextAuth v5, provider Credentials, JWT). Tests con Vitest.
 El bot de WhatsApp irá en un paquete separado (Fase 4).
 
 ```
@@ -33,19 +34,23 @@ docs/              visión, decisiones, specs
 ## Requisitos
 
 - Node >= 22, pnpm 9 (`corepack enable`)
-- Docker (para la base de datos de desarrollo)
+- Un proyecto de [Supabase](https://supabase.com) (PostgreSQL). No hace falta Docker.
 
 ## Puesta en marcha (desarrollo)
 
 ```bash
 pnpm install
 
-# copiar variables de entorno
-cp .env.example apps/web/.env    # ajustar AUTH_SECRET
+# variables de entorno
+cp .env.example apps/web/.env
+# En apps/web/.env completar con el dashboard de Supabase
+# (Project Settings -> Database -> Connection string):
+#   DATABASE_URL -> connection pooler, puerto 6543, con ?pgbouncer=true
+#   DIRECT_URL   -> conexión directa, puerto 5432 (la usa prisma migrate)
+# y generar AUTH_SECRET con: openssl rand -base64 32
 
-# base de datos
-pnpm db:up            # levanta Postgres en Docker (puerto 5432)
-pnpm db:migrate       # aplica migraciones Prisma
+# base de datos (las tablas viven en Supabase)
+pnpm db:migrate       # aplica migraciones Prisma sobre Supabase (via DIRECT_URL)
 pnpm db:seed          # carga catálogo ficticio (idempotente; no corre en producción)
 
 pnpm dev              # Next.js en http://localhost:3000
