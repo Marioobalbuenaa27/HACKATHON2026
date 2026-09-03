@@ -1,0 +1,14 @@
+# Local environment files and secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Node / Prisma generated files
+node_modules/
+apps/web/node_modules/
+apps/web/prisma/generated/
+
+# Build output
+.next/
+dist/
