@@ -10,7 +10,7 @@ Panel administrativo + formulario ciudadano web + bot de WhatsApp, sobre un back
 
 | Fase | Descripción | Estado |
 |------|-------------|--------|
-| 1 | Núcleo administrativo | Spec **Approved** · scaffolding listo · implementación pendiente |
+| 1 | Núcleo administrativo | **API implementada** · 65/65 tests en verde · sin UI (route handlers `/api/admin/**`) |
 | 2 | Operación del día | No iniciada |
 | 3 | Canal ciudadano web | No iniciada |
 | 4 | Bot de WhatsApp | No iniciada |
@@ -54,8 +54,19 @@ pnpm db:migrate       # aplica migraciones Prisma sobre Supabase (via DIRECT_URL
 pnpm db:seed          # carga catálogo ficticio (idempotente; no corre en producción)
 
 pnpm dev              # Next.js en http://localhost:3000
-pnpm test             # Vitest (hoy: 64 stubs en rojo — RED phase de la Fase 1)
 ```
+
+### Tests
+
+Los tests de integración corren contra un **schema aislado** (`turnero_test`) del
+mismo proyecto Supabase (sin Docker). Preparar una sola vez:
+
+```bash
+cp apps/web/.env.test.example apps/web/.env.test   # completar con las credenciales de Supabase
+pnpm test:db:setup                                  # aplica las migraciones en el schema turnero_test
+pnpm test                                           # Vitest — 65 tests de la Fase 1
+```
+
 
 ### Usuarios del seed (solo desarrollo)
 
