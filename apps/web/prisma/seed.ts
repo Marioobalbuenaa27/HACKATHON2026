@@ -215,10 +215,16 @@ export async function sembrar() {
   if (categoriaDemo && primerPediatra && salaDemo) {
     const fechaDemo = new Date();
     const inicioDemo = new Date(Date.UTC(fechaDemo.getUTCFullYear(), fechaDemo.getUTCMonth(), fechaDemo.getUTCDate()));
+    const pacienteDemo = await db.paciente.upsert({
+      where: { dni: "40123456" },
+      update: {},
+      create: { dni: "40123456", nombre: "Paciente Demo", fechaNacimiento: new Date("2020-05-12T00:00:00.000Z") },
+    });
     const existeDemo = await db.turno.findFirst({ where: { pacienteDni: "40123456", pacienteNacimiento: new Date("2020-05-12T00:00:00.000Z"), fecha: inicioDemo } });
     if (!existeDemo) {
       await db.turno.create({
         data: {
+          pacienteId: pacienteDemo.id,
           profesionalId: primerPediatra.id,
           especialidadId: pediatriaId,
           salaId: salaDemo.id,

@@ -41,6 +41,13 @@ export { db };
 const TABLAS = [
   "auditoria",
   "corrida_generacion",
+  "evento_notificable",
+  "caso_reprogramacion",
+  "demanda_espontanea",
+  "reserva_temporal",
+  "ausencia_profesional_dia",
+  "turno",
+  "paciente",
   "slot",
   "excepcion_agenda",
   "franja_agenda",
