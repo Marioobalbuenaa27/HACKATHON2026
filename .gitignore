@@ -1,6 +1,8 @@
 # dependencies
 node_modules/
 .pnpm-store/
+.data/
+packages/whatsapp-bot/.env
 
 # next.js
 .next/
