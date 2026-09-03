@@ -13,7 +13,7 @@ Panel administrativo + formulario ciudadano web + bot de WhatsApp, sobre un back
 | 1 | Núcleo administrativo | **API implementada** · 65/65 tests en verde · sin UI (route handlers `/api/admin/**`) |
 | 2 | Operación del día | No iniciada |
 | 3 | Canal ciudadano web | No iniciada |
-| 4 | Bot de WhatsApp | No iniciada |
+| 4 | Bot de WhatsApp | Paquete base/demo listo; integración de turnos pendiente de Fases 2–3 |
 
 ## Stack
 
@@ -30,6 +30,10 @@ apps/web/          app Next.js (panel + formulario ciudadano)
 packages/          (reservado — bot de WhatsApp, Fase 4)
 docs/              visión, decisiones, specs
 ```
+
+El bot de demostración se inicia con `pnpm dev:whatsapp`. Sus contratos de
+turnos son intercambiables: hasta que la Fase 3 exista, usa datos ficticios y
+no accede directamente a Prisma.
 
 ## Requisitos
 
