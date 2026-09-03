@@ -11,6 +11,7 @@
     "dev": "pnpm --filter web dev",
     "build": "pnpm --filter web build",
     "test": "pnpm --filter web test",
+    "test:db:setup": "pnpm --filter web test:db:setup",
     "db:migrate": "pnpm --filter web prisma migrate dev",
     "db:deploy": "pnpm --filter web prisma migrate deploy",
     "db:seed": "pnpm --filter web prisma db seed",

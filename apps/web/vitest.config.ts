@@ -8,8 +8,14 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["tests/**/*.{test,spec}.ts"],
+    setupFiles: ["tests/setup.ts"],
     css: false,
     globals: false,
+    // Todos los archivos comparten el mismo schema `turnero_test`: se corren en
+    // serie para que el TRUNCATE de un archivo no borre los datos de otro.
+    fileParallelism: false,
+    hookTimeout: 30_000,
+    testTimeout: 30_000,
   },
   resolve: {
     alias: {

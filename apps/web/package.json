@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:db:setup": "dotenv -e .env.test -- prisma migrate deploy",
     "prisma": "prisma"
   },
   "prisma": {
@@ -26,6 +27,8 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
+    "dotenv": "^16.4.7",
+    "dotenv-cli": "^8.0.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

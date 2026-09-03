@@ -14,7 +14,9 @@ dist/
 # env
 .env
 .env*.local
+.env.test
 !.env.example
+!.env.test.example
 
 # testing
 coverage/
