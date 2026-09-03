@@ -94,7 +94,9 @@ const CATEGORIAS: Array<{
   { nombre: "Convulsión / pérdida de conocimiento", prioridadBase: PrioridadBase.NORMAL, derivarAGuardia: true, especialidades: [] },
 ];
 
-async function main() {
+export { assertNoProd };
+
+export async function sembrar() {
   assertNoProd();
   const passwordHash = await hash(DEV_PASSWORD);
 
@@ -244,12 +246,18 @@ async function main() {
     franjas: await db.franjaAgenda.count(),
   };
   console.log("Seed completo:", counts);
+  return counts;
 }
 
-main()
-  .then(() => db.$disconnect())
-  .catch(async (e) => {
-    console.error(e);
-    await db.$disconnect();
-    process.exit(1);
-  });
+// Auto-ejecución sólo cuando se corre como script (`tsx prisma/seed.ts`),
+// no cuando se importa desde un test.
+const esScript = process.argv[1] && /seed\.(ts|js|mjs)$/.test(process.argv[1]);
+if (esScript) {
+  sembrar()
+    .then(() => db.$disconnect())
+    .catch(async (e) => {
+      console.error(e);
+      await db.$disconnect();
+      process.exit(1);
+    });
+}

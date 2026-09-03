@@ -1,529 +1,901 @@
 /**
- * Test suite for: Fase 1 — Núcleo administrativo (Turnero JP)
- * Auto-generated from spec. 45 acceptance criteria, 19 edge cases.
- *
- * All tests are stubs — implement the test body to make them pass.
- * Fase 4 del spec-driven-workflow: RED phase. Cada stub se reemplaza por un
- * test real al implementar su AC/EC en la Fase 5.
+ * Suite de la Fase 1 — Núcleo administrativo (Turnero JP).
+ * 45 acceptance criteria + 19 edge cases del spec
+ * docs/specs/fase-1-nucleo-administrativo.md, implementados contra los Route
+ * Handlers de /api/admin/** y la función pura de cálculo de slots.
  */
-import { describe, it } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { Prisma } from "@prisma/client";
 
-describe("Fase 1 — Núcleo administrativo (Turnero JP)", () => {
-  it("AC-1: Login exitoso [FR-1, FR-4]", () => {
-    // Given un usuario del panel activo con email `coord@hospital.test` y contraseña correcta
-    // When hace `POST /api/admin/auth/login` con esas credenciales
-    // Then recibe 200, se establece una cookie de sesión httpOnly + Secure + SameSite=Lax
-    // Then el cuerpo incluye su nombre y rol, y no incluye hash ni contraseña
+import { db, usarSesion } from "./setup";
+import { actuarComo, actuarComoRol, crearUsuarioDB, crearEspecialidadDB, crearSalaDB, crearProfesionalDB, llamar, sembrarParametros, fallarUnaVez, PASSWORD_OK } from "./helpers";
+import { _resetRateLimit, registrarLoginFallido } from "@/lib/rate-limit";
+import { hoyEnAR, sumarDias, diaSemanaDeFecha } from "@/lib/fechas";
+import { calcularSlots } from "@/lib/slots/calcular";
 
-    throw new Error("Not implemented");
+import { POST as login } from "@/app/api/admin/auth/login/route";
+import { POST as logout } from "@/app/api/admin/auth/logout/route";
+import { GET as me } from "@/app/api/admin/auth/me/route";
+import { POST as crearUsuario } from "@/app/api/admin/usuarios/route";
+import { PATCH as editarUsuario } from "@/app/api/admin/usuarios/[id]/route";
+import { GET as listarEsp, POST as crearEsp } from "@/app/api/admin/especialidades/route";
+import { PATCH as editarEsp } from "@/app/api/admin/especialidades/[id]/route";
+import { POST as crearProf } from "@/app/api/admin/profesionales/route";
+import { PATCH as editarProf } from "@/app/api/admin/profesionales/[id]/route";
+import { GET as listarCat, POST as crearCat } from "@/app/api/admin/categorias/route";
+import { PATCH as editarCat } from "@/app/api/admin/categorias/[id]/route";
+import { PUT as mapearCat } from "@/app/api/admin/categorias/[id]/especialidades/route";
+import { POST as crearSala } from "@/app/api/admin/salas/route";
+import { GET as listarOS, POST as crearOS } from "@/app/api/admin/obras-sociales/route";
+import { POST as crearFranja } from "@/app/api/admin/franjas/route";
+import { DELETE as borrarFranja } from "@/app/api/admin/franjas/[id]/route";
+import { POST as crearExcepcion } from "@/app/api/admin/excepciones/route";
+import { GET as listarSlots } from "@/app/api/admin/slots/route";
+import { POST as generarSlotsHTTP } from "@/app/api/admin/slots/generar/route";
+import { GET as getParametros, PATCH as patchParametros } from "@/app/api/admin/parametros/route";
+import { GET as getAuditoria } from "@/app/api/admin/auditoria/route";
+import { PATCH as patchAuditoria, DELETE as deleteAuditoria } from "@/app/api/admin/auditoria/[id]/route";
+
+beforeEach(() => _resetRateLimit());
+
+// Helpers de armado
+async function agendaBase(dur = 15) {
+  const esp = await crearEspecialidadDB({ duracionTurnoMin: dur });
+  const sala = await crearSalaDB();
+  const prof = await crearProfesionalDB([esp.id]);
+  return { esp, sala, prof };
+}
+const proximoDia = (dia: string) => {
+  let f = hoyEnAR();
+  for (let i = 0; i < 8; i++) {
+    if (diaSemanaDeFecha(f) === dia) return f;
+    f = sumarDias(f, 1);
+  }
+  return f;
+};
+
+// ───────────────────────── Autenticación ─────────────────────────
+
+describe("Autenticación y roles", () => {
+  it("AC-1: Login exitoso [FR-1, FR-4]", async () => {
+    const u = await crearUsuarioDB({ email: "coord@hospital.test", rol: "COORDINACION", nombre: "Coord" });
+    const r = await llamar(login, { body: { email: "coord@hospital.test", password: PASSWORD_OK } });
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ usuarioId: u.id, nombre: "Coord", rol: "COORDINACION" });
+    expect(JSON.stringify(r.body)).not.toMatch(/passwordHash|argon2/i);
+    expect(r.setCookie).toMatch(/authjs\.session-token=/);
+    expect(r.setCookie?.toLowerCase()).toContain("httponly");
+    expect(r.setCookie?.toLowerCase()).toContain("samesite=lax");
   });
 
-  it("AC-2: Login con contraseña incorrecta [FR-2, FR-3]", () => {
-    // Given un usuario del panel activo con email `coord@hospital.test`
-    // When hace `POST /api/admin/auth/login` con una contraseña incorrecta
-    // Then recibe 401 con `error = "CREDENCIALES_INVALIDAS"`
-    // Then no se establece cookie de sesión
-
-    throw new Error("Not implemented");
+  it("AC-2: Login con contraseña incorrecta [FR-2, FR-3]", async () => {
+    await crearUsuarioDB({ email: "coord@hospital.test", rol: "COORDINACION" });
+    const r = await llamar(login, { body: { email: "coord@hospital.test", password: "otra-clave-99" } });
+    expect(r.status).toBe(401);
+    expect(r.body.error).toBe("CREDENCIALES_INVALIDAS");
+    expect(r.setCookie).toBeNull();
   });
 
-  it("AC-3: Login de usuario inactivo [FR-2]", () => {
-    // Given un usuario del panel cuyo campo `activo` es `false`
-    // When hace `POST /api/admin/auth/login` con la contraseña correcta
-    // Then recibe 401 con `error = "CREDENCIALES_INVALIDAS"` (mismo cuerpo que el caso de contraseña incorrecta)
-
-    throw new Error("Not implemented");
+  it("AC-3: Login de usuario inactivo [FR-2]", async () => {
+    await crearUsuarioDB({ email: "coord@hospital.test", rol: "COORDINACION", activo: false });
+    const r = await llamar(login, { body: { email: "coord@hospital.test", password: PASSWORD_OK } });
+    expect(r.status).toBe(401);
+    expect(r.body.error).toBe("CREDENCIALES_INVALIDAS");
   });
 
-  it("AC-4: Acceso sin sesión bloqueado [FR-6, NFR-S1]", () => {
-    // Given una petición sin cookie de sesión válida
-    // When hace `GET /api/admin/especialidades`
-    // Then recibe 401 con `error = "NO_AUTENTICADO"`
-
-    throw new Error("Not implemented");
+  it("AC-4: Acceso sin sesión bloqueado [FR-6, NFR-S1]", async () => {
+    const r = await llamar(listarEsp, {});
+    expect(r.status).toBe(401);
+    expect(r.body.error).toBe("NO_AUTENTICADO");
   });
 
-  it("AC-5: Acceso con rol no autorizado [FR-7, NFR-S7]", () => {
-    // Given una sesión válida con rol `PROFESIONAL`
-    // When hace `POST /api/admin/especialidades` con un cuerpo válido
-    // Then recibe 403 con `error = "NO_AUTORIZADO"`
-    // Then no se crea ninguna especialidad
-
-    throw new Error("Not implemented");
+  it("AC-5: Acceso con rol no autorizado [FR-7, NFR-S7]", async () => {
+    await actuarComoRol("PROFESIONAL");
+    const r = await llamar(crearEsp, { body: { nombre: "X", duracionTurnoMin: 15 } });
+    expect(r.status).toBe(403);
+    expect(r.body.error).toBe("NO_AUTORIZADO");
+    expect(await db.especialidad.count()).toBe(0);
   });
 
-  it("AC-6: Rate limiting de login [NFR-S2]", () => {
-    // Given 5 intentos de login fallidos para el email `coord@hospital.test` en los últimos 10 minutos
-    // When se hace un 6º `POST /api/admin/auth/login` con ese email
-    // Then recibe 429 con `error = "DEMASIADOS_INTENTOS"`
-    // Then no se evalúan las credenciales
-
-    throw new Error("Not implemented");
+  it("AC-6: Rate limiting de login [NFR-S2]", async () => {
+    await crearUsuarioDB({ email: "coord@hospital.test", rol: "COORDINACION" });
+    for (let i = 0; i < 5; i++) registrarLoginFallido("1.2.3.4", "coord@hospital.test");
+    const r = await llamar(login, {
+      body: { email: "coord@hospital.test", password: PASSWORD_OK },
+      headers: { "x-forwarded-for": "1.2.3.4" },
+    });
+    expect(r.status).toBe(429);
+    expect(r.body.error).toBe("DEMASIADOS_INTENTOS");
   });
 
-  it("AC-7: Alta de usuario por ADMIN y reset de contraseña [FR-8, FR-5, FR-12]", () => {
-    // Given una sesión con rol `ADMIN`
-    // When hace `POST /api/admin/usuarios` con nombre, email nuevo y rol `RECEPCION`
-    // Then recibe 201 con el usuario creado (sin contraseña ni hash)
-    // Then el usuario puede iniciar sesión con la contraseña temporal devuelta o generada
+  it("AC-7: Alta de usuario por ADMIN y reset de contraseña [FR-8, FR-5, FR-12]", async () => {
+    await actuarComoRol("ADMIN");
+    const r = await llamar(crearUsuario, { body: { nombre: "Nueva Recep", email: "nueva@hospital.test", rol: "RECEPCION" } });
+    expect(r.status).toBe(201);
+    expect(r.body.passwordTemporal).toBeTypeOf("string");
+    expect(JSON.stringify(r.body)).not.toMatch(/passwordHash|argon2/i);
 
-    throw new Error("Not implemented");
+    usarSesion(null);
+    const l = await llamar(login, { body: { email: "nueva@hospital.test", password: r.body.passwordTemporal } });
+    expect(l.status).toBe(200);
+    expect(l.body.rol).toBe("RECEPCION");
   });
 
-  it("AC-8: ADMIN no puede autodesactivarse [FR-10]", () => {
-    // Given una sesión con rol `ADMIN` cuyo `usuarioId` es `U1`
-    // When hace `PATCH /api/admin/usuarios/U1` con `{ "activo": false }`
-    // Then recibe 409 con `error = "OPERACION_SOBRE_SI_MISMO"`
-    // Then su cuenta sigue activa
-
-    throw new Error("Not implemented");
+  it("AC-8: ADMIN no puede autodesactivarse [FR-10]", async () => {
+    const u = await crearUsuarioDB({ rol: "ADMIN" });
+    await crearUsuarioDB({ rol: "ADMIN" }); // otro admin, para descartar ULTIMO_ADMIN
+    actuarComo({ usuarioId: u.id, rol: "ADMIN" });
+    const r = await llamar(editarUsuario, { body: { activo: false }, params: { id: u.id } });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toBe("OPERACION_SOBRE_SI_MISMO");
+    expect((await db.usuario.findUnique({ where: { id: u.id } }))?.activo).toBe(true);
   });
 
-  it("AC-9: Desactivar cuenta cierra su sesión y no borra el usuario [FR-9, FR-11, NFR-S4]", () => {
-    // Given el usuario `U2` tiene una sesión activa
-    // When un `ADMIN` hace `PATCH /api/admin/usuarios/U2` con `{ "activo": false }`
-    // Then la siguiente petición autenticada de `U2` recibe 401
-    // Then `U2` no puede volver a iniciar sesión
-    // Then el registro de `U2` sigue existiendo (no hay endpoint de hard delete de usuarios)
+  it("AC-9: Desactivar cuenta cierra su sesión y no borra el usuario [FR-9, FR-11, NFR-S4]", async () => {
+    await actuarComoRol("ADMIN");
+    const u2 = await crearUsuarioDB({ rol: "RECEPCION", email: "u2@hospital.test" });
+    const r = await llamar(editarUsuario, { body: { activo: false }, params: { id: u2.id } });
+    expect(r.status).toBe(200);
 
-    throw new Error("Not implemented");
+    // Petición autenticada de U2 -> 401 (me revalida contra la DB).
+    actuarComo({ usuarioId: u2.id, rol: "RECEPCION" });
+    expect((await llamar(me, {})).status).toBe(401);
+
+    // No puede volver a loguearse.
+    usarSesion(null);
+    expect((await llamar(login, { body: { email: "u2@hospital.test", password: PASSWORD_OK } })).status).toBe(401);
+
+    // El registro sigue existiendo.
+    expect(await db.usuario.findUnique({ where: { id: u2.id } })).not.toBeNull();
   });
 
-  it("AC-10: Logout invalida la sesión [FR-11]", () => {
-    // Given una sesión válida
-    // When hace `POST /api/admin/auth/logout`
-    // Then recibe 204, la cookie de sesión se elimina
-    // Then una petición posterior con esa cookie recibe 401
+  it("AC-10: Logout invalida la sesión [FR-11]", async () => {
+    await actuarComoRol("ADMIN");
+    const r = await llamar(logout, {});
+    expect(r.status).toBe(204);
+    expect(r.setCookie).toMatch(/authjs\.session-token=;|Max-Age=0/i);
 
-    throw new Error("Not implemented");
+    usarSesion(null);
+    expect((await llamar(me, {})).status).toBe(401);
   });
 
-  it("AC-11: Alta de especialidad [FR-13, FR-24]", () => {
-    // Given una sesión con rol `ADMIN`
-    // When hace `POST /api/admin/especialidades` con `{ "nombre": "Cardiología infantil", "duracionTurnoMin": 20 }`
-    // Then recibe 201 con la especialidad creada y `activa = true`
-
-    throw new Error("Not implemented");
+  it("EC-1: Email inválido en login -> 400 VALIDACION sin tocar credenciales", async () => {
+    const r = await llamar(login, { body: { email: "no-es-email", password: PASSWORD_OK } });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toBe("VALIDACION");
   });
 
-  it("AC-12: Especialidad con nombre duplicado [FR-24]", () => {
-    // Given ya existe una especialidad "Cardiología infantil"
-    // When se hace `POST /api/admin/especialidades` con `{ "nombre": "cardiología INFANTIL", "duracionTurnoMin": 30 }`
-    // Then recibe 409 con `error = "NOMBRE_DUPLICADO"`
+  it("EC-3: Sin sesión en el store -> 401 NO_AUTENTICADO", async () => {
+    usarSesion(null);
+    const r = await llamar(me, {});
+    expect(r.status).toBe(401);
+    expect(r.body.error).toBe("NO_AUTENTICADO");
+  });
+});
 
-    throw new Error("Not implemented");
+// ───────────────────────── Especialidades ─────────────────────────
+
+describe("ABM especialidades", () => {
+  it("AC-11: Alta de especialidad [FR-13, FR-24]", async () => {
+    await actuarComoRol("ADMIN");
+    const r = await llamar(crearEsp, { body: { nombre: "Cardiología infantil", duracionTurnoMin: 20 } });
+    expect(r.status).toBe(201);
+    expect(r.body).toMatchObject({ nombre: "Cardiología infantil", duracionTurnoMin: 20, activa: true });
   });
 
-  it("AC-13: Duración de turno inválida [FR-13]", () => {
-    // Given una sesión con rol `ADMIN`
-    // When hace `POST /api/admin/especialidades` con `{ "nombre": "Test", "duracionTurnoMin": 22 }`
-    // Then recibe 400 con `error = "VALIDACION"` y `details.duracionTurnoMin` indicando que debe ser múltiplo de 5 entre 5 y 120
-
-    throw new Error("Not implemented");
+  it("AC-12: Especialidad con nombre duplicado [FR-24]", async () => {
+    await actuarComoRol("ADMIN");
+    await crearEspecialidadDB({ nombre: "Cardiología infantil" });
+    const r = await llamar(crearEsp, { body: { nombre: "cardiología INFANTIL", duracionTurnoMin: 30 } });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toBe("NOMBRE_DUPLICADO");
   });
 
-  it("AC-14: Alta de profesional con especialidad [FR-14]", () => {
-    // Given existe la especialidad "Pediatría general"
-    // When un `COORDINACION` hace `POST /api/admin/profesionales` con nombre, apellido, matrícula y `especialidadIds` con esa especialidad
-    // Then recibe 201 con el profesional creado y su lista de especialidades
-
-    throw new Error("Not implemented");
+  it("AC-13: Duración de turno inválida [FR-13]", async () => {
+    await actuarComoRol("ADMIN");
+    const r = await llamar(crearEsp, { body: { nombre: "Test", duracionTurnoMin: 22 } });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toBe("VALIDACION");
+    expect(r.body.details.duracionTurnoMin).toBeDefined();
   });
 
-  it("AC-15: Profesional sin especialidad rechazado [FR-14]", () => {
-    // Given una sesión con rol `COORDINACION`
-    // When hace `POST /api/admin/profesionales` con `especialidadIds: []`
-    // Then recibe 400 con `error = "VALIDACION"` y `details.especialidadIds` indicando que se requiere al menos una
-
-    throw new Error("Not implemented");
+  it("AC-22: No se desactiva una especialidad usada por una franja activa [FR-21]", async () => {
+    const { esp, prof, sala } = await agendaBase();
+    await db.franjaAgenda.create({
+      data: {
+        profesionalId: prof.id, diaSemana: "LUNES", horaInicio: "08:00", horaFin: "09:00",
+        especialidadId: esp.id, salaId: sala.id, vigenciaDesde: new Date("2026-01-01T00:00:00Z"),
+      },
+    });
+    await actuarComoRol("ADMIN");
+    const r = await llamar(editarEsp, { body: { activa: false }, params: { id: esp.id } });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toBe("ENTIDAD_EN_USO");
+    expect(r.body.details.franjas).toHaveLength(1);
   });
 
-  it("AC-16: Un usuario PROFESIONAL no puede vincularse a dos profesionales [FR-15]", () => {
-    // Given el usuario `U5` (rol `PROFESIONAL`) ya está vinculado al profesional `P1`
-    // When se hace `PATCH /api/admin/profesionales/P2` con `{ "usuarioId": "U5" }`
-    // Then recibe 409 con `error = "USUARIO_YA_VINCULADO"`
-
-    throw new Error("Not implemented");
+  it("AC-23: Entidades desactivadas se excluyen del listado por defecto [FR-22]", async () => {
+    await db.obraSocial.create({ data: { nombre: "OS9", activa: false } });
+    await actuarComoRol("ADMIN");
+    const visible = await llamar(listarOS, {});
+    expect(visible.body.items.find((o: { nombre: string }) => o.nombre === "OS9")).toBeUndefined();
+    const todas = await llamar(listarOS, { query: { incluirInactivas: "true" } });
+    expect(todas.body.items.find((o: { nombre: string }) => o.nombre === "OS9")).toBeDefined();
   });
 
-  it("AC-17: Alta de categoría de problema [FR-16]", () => {
-    // Given una sesión con rol `ADMIN`
-    // When hace `POST /api/admin/categorias` con `{ "nombre": "Tos y mocos hace varios días", "prioridadBase": "NORMAL", "derivarAGuardia": false }`
-    // Then recibe 201 con la categoría creada
-
-    throw new Error("Not implemented");
+  it("EC-2: JSON malformado -> 400 JSON_INVALIDO", async () => {
+    await actuarComoRol("ADMIN");
+    const r = await llamar(crearEsp, { raw: "{ no es json" });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toBe("JSON_INVALIDO");
   });
 
-  it("AC-18: Mapeo categoría → especialidad muchos a muchos [FR-17]", () => {
-    // Given existen la categoría `C1` y las especialidades `E1` y `E2`
-    // When un `ADMIN` hace `PUT /api/admin/categorias/C1/especialidades` con `[{ "especialidadId": "E1" }, { "especialidadId": "E2", "nota": "Si además hay fiebre" }]`
-    // Then recibe 200 y la categoría `C1` queda mapeada a `E1` y `E2` con la nota en `E2`
-
-    throw new Error("Not implemented");
+  it("EC-4: Nombre duplicado por carrera -> 409 NOMBRE_DUPLICADO", async () => {
+    await actuarComoRol("ADMIN");
+    const a = await llamar(crearEsp, { body: { nombre: "Nefro", duracionTurnoMin: 15 } });
+    const b = await llamar(crearEsp, { body: { nombre: "Nefro", duracionTurnoMin: 15 } });
+    expect(a.status).toBe(201);
+    expect(b.status).toBe(409);
+    expect(b.body.error).toBe("NOMBRE_DUPLICADO");
   });
 
-  it("AC-19: Categoría marcada 'derivar a guardia' no admite mapeos [FR-18]", () => {
-    // Given la categoría `C2` tiene `derivarAGuardia = true`
-    // When se hace `PUT /api/admin/categorias/C2/especialidades` con `[{ "especialidadId": "E1" }]`
-    // Then recibe 409 con `error = "CATEGORIA_DERIVA_A_GUARDIA"`
-
-    throw new Error("Not implemented");
+  it("EC-5: Caída de PostgreSQL -> 503 BASE_DE_DATOS_NO_DISPONIBLE", async () => {
+    await actuarComoRol("ADMIN");
+    const err = new Prisma.PrismaClientKnownRequestError("db down", { code: "P1001", clientVersion: "x" });
+    fallarUnaVez(db.especialidad, "count", err);
+    fallarUnaVez(db.especialidad, "findMany", err);
+    const r = await llamar(listarEsp, {});
+    expect(r.status).toBe(503);
+    expect(r.body.error).toBe("BASE_DE_DATOS_NO_DISPONIBLE");
   });
 
-  it("AC-20: No se puede marcar derivarAGuardia con mapeos existentes [FR-18]", () => {
-    // Given la categoría `C3` está mapeada a la especialidad `E1`
-    // When se hace `PATCH /api/admin/categorias/C3` con `{ "derivarAGuardia": true }`
-    // Then recibe 409 con `error = "CATEGORIA_TIENE_MAPEOS"`
+  it("EC-11: Cambiar duración marca franjas inconsistentes [EC-11]", async () => {
+    const { esp, prof, sala } = await agendaBase(15);
+    const franja = await db.franjaAgenda.create({
+      data: {
+        profesionalId: prof.id, diaSemana: "LUNES", horaInicio: "08:00", horaFin: "09:00",
+        especialidadId: esp.id, salaId: sala.id, vigenciaDesde: new Date("2026-01-01T00:00:00Z"),
+      },
+    });
+    await actuarComoRol("ADMIN");
+    await llamar(editarEsp, { body: { duracionTurnoMin: 25 }, params: { id: esp.id } });
+    expect((await db.franjaAgenda.findUnique({ where: { id: franja.id } }))?.inconsistente).toBe(true);
 
-    throw new Error("Not implemented");
+    await actuarComoRol("COORDINACION");
+    const g = await llamar(generarSlotsHTTP, { body: { profesionalId: prof.id } });
+    expect(g.body.franjasInconsistentesOmitidas).toContain(franja.id);
+    expect(await db.slot.count({ where: { profesionalId: prof.id } })).toBe(0);
   });
 
-  it("AC-21: Alta de sala y de obra social [FR-19, FR-20]", () => {
-    // Given una sesión con rol `COORDINACION` para salas y `ADMIN` para obras sociales
-    // When hace `POST /api/admin/salas` con `{ "identificador": "Consultorio 4", "ubicacion": "PB ala este" }` y `POST /api/admin/obras-sociales` con `{ "nombre": "OSDE" }`
-    // Then ambas devuelven 201 con la entidad creada y `activa = true`
+  it("EC-17: Paginación fuera de rango se normaliza", async () => {
+    await actuarComoRol("ADMIN");
+    await crearEspecialidadDB();
+    const r = await llamar(listarEsp, { query: { page: "999", pageSize: "500" } });
+    expect(r.status).toBe(200);
+    expect(r.body.pageSize).toBe(100);
+    expect(r.body.items).toHaveLength(0);
+  });
+});
 
-    throw new Error("Not implemented");
+// ───────────────────────── Profesionales ─────────────────────────
+
+describe("ABM profesionales", () => {
+  it("AC-14: Alta de profesional con especialidad [FR-14]", async () => {
+    const esp = await crearEspecialidadDB({ nombre: "Pediatría general" });
+    await actuarComoRol("COORDINACION");
+    const r = await llamar(crearProf, {
+      body: { nombre: "Ana", apellido: "López", matricula: "MP-1", especialidadIds: [esp.id] },
+    });
+    expect(r.status).toBe(201);
+    expect(r.body.especialidadIds).toEqual([esp.id]);
   });
 
-  it("AC-22: No se puede desactivar una especialidad usada por una franja activa [FR-21]", () => {
-    // Given la especialidad `E1` está referenciada por la franja activa `F1`
-    // When se hace `PATCH /api/admin/especialidades/E1` con `{ "activa": false }`
-    // Then recibe 409 con `error = "ENTIDAD_EN_USO"` y `details.franjas` lista `F1`
-
-    throw new Error("Not implemented");
+  it("AC-15: Profesional sin especialidad rechazado [FR-14]", async () => {
+    await actuarComoRol("COORDINACION");
+    const r = await llamar(crearProf, { body: { nombre: "A", apellido: "B", matricula: "MP-2", especialidadIds: [] } });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toBe("VALIDACION");
+    expect(r.body.details.especialidadIds).toBeDefined();
   });
 
-  it("AC-23: Entidades desactivadas se excluyen del listado por defecto [FR-22]", () => {
-    // Given la obra social `OS9` está desactivada
-    // When se hace `GET /api/admin/obras-sociales`
-    // Then la respuesta no incluye `OS9`
-    // Then `GET /api/admin/obras-sociales?incluirInactivas=true` sí la incluye
-
-    throw new Error("Not implemented");
+  it("AC-16: Un usuario PROFESIONAL no puede vincularse a dos profesionales [FR-15]", async () => {
+    const esp = await crearEspecialidadDB();
+    const u5 = await crearUsuarioDB({ rol: "PROFESIONAL", email: "u5@hospital.test" });
+    await crearProfesionalDB([esp.id], { usuarioId: u5.id, matricula: "MP-P1" });
+    const p2 = await crearProfesionalDB([esp.id], { matricula: "MP-P2" });
+    await actuarComoRol("COORDINACION");
+    const r = await llamar(editarProf, { body: { usuarioId: u5.id }, params: { id: p2.id } });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toBe("USUARIO_YA_VINCULADO");
   });
 
-  it("AC-24: Reordenar categorías [FR-23]", () => {
-    // Given existen categorías `C1` (orden 1) y `C2` (orden 2)
-    // When un `ADMIN` hace `PATCH /api/admin/categorias/C2` con `{ "orden": 0 }`
-    // Then `GET /api/admin/categorias` devuelve `C2` antes que `C1`
+  it("EC-18: Matrícula de profesional duplicada -> 409 MATRICULA_DUPLICADA", async () => {
+    const esp = await crearEspecialidadDB();
+    await crearProfesionalDB([esp.id], { matricula: "MP-DUP" });
+    await actuarComoRol("COORDINACION");
+    const r = await llamar(crearProf, {
+      body: { nombre: "A", apellido: "B", matricula: "mp-dup", especialidadIds: [esp.id] },
+    });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toBe("MATRICULA_DUPLICADA");
+  });
+});
 
-    throw new Error("Not implemented");
+// ───────────────────────── Categorías ─────────────────────────
+
+describe("ABM categorías y mapeo", () => {
+  it("AC-17: Alta de categoría de problema [FR-16]", async () => {
+    await actuarComoRol("ADMIN");
+    const r = await llamar(crearCat, {
+      body: { nombre: "Tos y mocos hace varios días", prioridadBase: "NORMAL", derivarAGuardia: false },
+    });
+    expect(r.status).toBe(201);
+    expect(r.body.nombre).toBe("Tos y mocos hace varios días");
   });
 
-  it("AC-25: Alta de franja de agenda válida [FR-25, FR-26]", () => {
-    // Given el profesional `P1` atiende "Pediatría general" (duración 15 min) y existe la sala `S1`
-    // When un `COORDINACION` hace `POST /api/admin/franjas` con día `LUNES`, `08:00`–`12:00`, especialidad de `P1`, sala `S1`, `vigenciaDesde` hoy
-    // Then recibe 201 con la franja creada
-
-    throw new Error("Not implemented");
+  it("AC-18: Mapeo categoría → especialidad muchos a muchos [FR-17]", async () => {
+    const e1 = await crearEspecialidadDB();
+    const e2 = await crearEspecialidadDB();
+    const cat = await db.categoriaProblema.create({ data: { nombre: "C1", prioridadBase: "NORMAL" } });
+    await actuarComoRol("ADMIN");
+    const r = await llamar(mapearCat, {
+      body: [{ especialidadId: e1.id }, { especialidadId: e2.id, nota: "Si además hay fiebre" }],
+      params: { id: cat.id },
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.especialidades).toHaveLength(2);
+    expect(r.body.especialidades.find((x: { especialidadId: string }) => x.especialidadId === e2.id).nota).toBe("Si además hay fiebre");
   });
 
-  it("AC-26: Franja con fin anterior al inicio [FR-26]", () => {
-    // Given una sesión con rol `COORDINACION`
-    // When hace `POST /api/admin/franjas` con `horaInicio = "12:00"` y `horaFin = "08:00"`
-    // Then recibe 400 con `error = "VALIDACION"` y `details.horaFin`
-
-    throw new Error("Not implemented");
+  it("AC-19: Categoría 'derivar a guardia' no admite mapeos [FR-18]", async () => {
+    const e1 = await crearEspecialidadDB();
+    const c2 = await db.categoriaProblema.create({ data: { nombre: "C2", prioridadBase: "NORMAL", derivarAGuardia: true } });
+    await actuarComoRol("ADMIN");
+    const r = await llamar(mapearCat, { body: [{ especialidadId: e1.id }], params: { id: c2.id } });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toBe("CATEGORIA_DERIVA_A_GUARDIA");
   });
 
-  it("AC-27: Franja con duración no múltiplo de la duración de turno [FR-26]", () => {
-    // Given la especialidad de `P1` tiene duración de turno 20 min
-    // When se hace `POST /api/admin/franjas` para `P1` con `08:00`–`08:30`
-    // Then recibe 400 con `error = "VALIDACION"` indicando que el rango debe ser múltiplo de 20 minutos
-
-    throw new Error("Not implemented");
+  it("AC-20: No se puede marcar derivarAGuardia con mapeos existentes [FR-18]", async () => {
+    const e1 = await crearEspecialidadDB();
+    const c3 = await db.categoriaProblema.create({
+      data: { nombre: "C3", prioridadBase: "NORMAL", especialidades: { create: [{ especialidadId: e1.id }] } },
+    });
+    await actuarComoRol("ADMIN");
+    const r = await llamar(editarCat, { body: { derivarAGuardia: true }, params: { id: c3.id } });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toBe("CATEGORIA_TIENE_MAPEOS");
   });
 
-  it("AC-28: Franjas solapadas del mismo profesional [FR-27]", () => {
-    // Given `P1` tiene una franja activa los lunes `08:00`–`12:00` vigente todo el año
-    // When se hace `POST /api/admin/franjas` para `P1` los lunes `11:00`–`13:00` con vigencia solapada
-    // Then recibe 409 con `error = "FRANJA_SOLAPADA"` y `details.franjaId` de la franja en conflicto
-
-    throw new Error("Not implemented");
+  it("AC-24: Reordenar categorías [FR-23]", async () => {
+    const c1 = await db.categoriaProblema.create({ data: { nombre: "C1", prioridadBase: "NORMAL", orden: 1 } });
+    const c2 = await db.categoriaProblema.create({ data: { nombre: "C2", prioridadBase: "NORMAL", orden: 2 } });
+    await actuarComoRol("ADMIN");
+    await llamar(editarCat, { body: { orden: 0 }, params: { id: c2.id } });
+    const r = await llamar(listarCat, {});
+    const ids = r.body.items.map((c: { id: string }) => c.id);
+    expect(ids.indexOf(c2.id)).toBeLessThan(ids.indexOf(c1.id));
   });
 
-  it("AC-29: Excepción de bloqueo elimina slots y dispara regeneración incremental [FR-28, FR-29, FR-32, FR-39]", () => {
-    // Given `P1` tiene franja los lunes `08:00`–`12:00` y hay slots generados para el lunes `2026-09-14`
-    // When un `COORDINACION` hace `POST /api/admin/excepciones` con `{ "profesionalId": "P1", "fecha": "2026-09-14", "tipo": "BLOQUEO", "motivo": "Licencia" }`
-    // Then recibe 201
-    // Then se dispara automáticamente la regeneración incremental de `P1` para las fechas afectadas
-    // Then los slots `DISPONIBLE` de `P1` del `2026-09-14` quedan eliminados; un slot en cualquier otro estado se conserva marcado `huerfano`
+  it("EC-19: Mapeo con especialidad inexistente/inactiva -> 400 VALIDACION", async () => {
+    const inactiva = await crearEspecialidadDB({ activa: false });
+    const cat = await db.categoriaProblema.create({ data: { nombre: "C1", prioridadBase: "NORMAL" } });
+    await actuarComoRol("ADMIN");
+    const r = await llamar(mapearCat, { body: [{ especialidadId: inactiva.id }], params: { id: cat.id } });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toBe("VALIDACION");
+    expect(JSON.stringify(r.body.details)).toContain(inactiva.id);
+  });
+});
 
-    throw new Error("Not implemented");
+// ───────────────────────── Salas / obras sociales ─────────────────────────
+
+describe("ABM salas y obras sociales", () => {
+  it("AC-21: Alta de sala y de obra social [FR-19, FR-20]", async () => {
+    await actuarComoRol("COORDINACION");
+    const s = await llamar(crearSala, { body: { identificador: "Consultorio 4", ubicacion: "PB ala este" } });
+    expect(s.status).toBe(201);
+    expect(s.body).toMatchObject({ identificador: "Consultorio 4", activa: true });
+
+    await actuarComoRol("ADMIN");
+    const o = await llamar(crearOS, { body: { nombre: "OSDE" } });
+    expect(o.status).toBe(201);
+    expect(o.body).toMatchObject({ nombre: "OSDE", activa: true });
+  });
+});
+
+// ───────────────────────── Franjas ─────────────────────────
+
+describe("Franjas de agenda", () => {
+  it("AC-25: Alta de franja de agenda válida [FR-25, FR-26]", async () => {
+    const { esp, prof, sala } = await agendaBase(15);
+    await actuarComoRol("COORDINACION");
+    const r = await llamar(crearFranja, {
+      body: {
+        profesionalId: prof.id, diaSemana: "LUNES", horaInicio: "08:00", horaFin: "12:00",
+        especialidadId: esp.id, salaId: sala.id, vigenciaDesde: hoyEnAR(),
+      },
+    });
+    expect(r.status).toBe(201);
+    expect(r.body.diaSemana).toBe("LUNES");
   });
 
-  it("AC-30: Excepción de apertura [FR-30, FR-34]", () => {
-    // Given `P1` no tiene franja los sábados
-    // When un `COORDINACION` hace `POST /api/admin/excepciones` con `{ "profesionalId": "P1", "fecha": "2026-09-13", "tipo": "APERTURA", "horaInicio": "09:00", "horaFin": "12:00", "especialidadId": "...", "salaId": "..." }`
-    // Then recibe 201
-    // Then tras la regeneración incremental existen slots `DISPONIBLE` de `P1` el `2026-09-13` entre `09:00` y `12:00` con `origen = "APERTURA"`
-
-    throw new Error("Not implemented");
+  it("AC-26: Franja con fin anterior al inicio [FR-26]", async () => {
+    await actuarComoRol("COORDINACION");
+    const r = await llamar(crearFranja, {
+      body: {
+        profesionalId: "x", diaSemana: "LUNES", horaInicio: "12:00", horaFin: "08:00",
+        especialidadId: "x", salaId: "x", vigenciaDesde: hoyEnAR(),
+      },
+    });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toBe("VALIDACION");
+    expect(r.body.details.horaFin).toBeDefined();
   });
 
-  it("AC-31: Apertura solapada con franja vigente [FR-31]", () => {
-    // Given `P1` tiene franja los lunes `08:00`–`12:00` vigente
-    // When se hace `POST /api/admin/excepciones` de tipo `APERTURA` para `P1` un lunes dentro de la vigencia, `10:00`–`13:00`
-    // Then recibe 409 con `error = "APERTURA_SOLAPADA"`
-
-    throw new Error("Not implemented");
+  it("AC-27: Franja con duración no múltiplo de la duración de turno [FR-26]", async () => {
+    const { esp, prof, sala } = await agendaBase(20);
+    await actuarComoRol("COORDINACION");
+    const r = await llamar(crearFranja, {
+      body: {
+        profesionalId: prof.id, diaSemana: "LUNES", horaInicio: "08:00", horaFin: "08:30",
+        especialidadId: esp.id, salaId: sala.id, vigenciaDesde: hoyEnAR(),
+      },
+    });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toBe("VALIDACION");
   });
 
-  it("AC-32: Generación de slots desde una franja [FR-33, FR-34, FR-35, FR-36]", () => {
-    // Given `P1` tiene una única franja los lunes `08:00`–`09:00`, especialidad con duración 15 min, sin excepciones, y `ventana_generacion_dias = 45`
-    // When se ejecuta la generación de slots
-    // Then para cada lunes en `[hoy, hoy+45]` existen exactamente 4 slots de `P1` (`08:00`, `08:15`, `08:30`, `08:45`), estado `DISPONIBLE`, `origen = "FRANJA"`
-
-    throw new Error("Not implemented");
+  it("AC-28: Franjas solapadas del mismo profesional [FR-27]", async () => {
+    const { esp, prof, sala } = await agendaBase(60);
+    const f1 = await db.franjaAgenda.create({
+      data: {
+        profesionalId: prof.id, diaSemana: "LUNES", horaInicio: "08:00", horaFin: "12:00",
+        especialidadId: esp.id, salaId: sala.id, vigenciaDesde: new Date("2026-01-01T00:00:00Z"),
+      },
+    });
+    await actuarComoRol("COORDINACION");
+    const r = await llamar(crearFranja, {
+      body: {
+        profesionalId: prof.id, diaSemana: "LUNES", horaInicio: "11:00", horaFin: "13:00",
+        especialidadId: esp.id, salaId: sala.id, vigenciaDesde: "2026-06-01",
+      },
+    });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toBe("FRANJA_SOLAPADA");
+    expect(r.body.details.franjaId).toBe(f1.id);
   });
 
-  it("AC-33: Resto final menor a la duración se descarta [FR-35]", () => {
-    // Given `P1` tiene una franja los martes `08:00`–`08:50`, especialidad con duración 20 min
-    // When se ejecuta la generación
-    // Then para cada martes en la ventana existen 2 slots (`08:00`, `08:20`) y ningún slot que empiece `08:40`
-
-    throw new Error("Not implemented");
+  it("EC-9: vigenciaHasta anterior a vigenciaDesde -> 400 VALIDACION", async () => {
+    await actuarComoRol("COORDINACION");
+    const r = await llamar(crearFranja, {
+      body: {
+        profesionalId: "x", diaSemana: "LUNES", horaInicio: "08:00", horaFin: "12:00",
+        especialidadId: "x", salaId: "x", vigenciaDesde: "2026-06-01", vigenciaHasta: "2026-01-01",
+      },
+    });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toBe("VALIDACION");
   });
 
-  it("AC-34: Generación idempotente [FR-38]", () => {
-    // Given ya se generaron los slots de `P1` para la ventana y ninguno cambió de estado
-    // When se ejecuta la generación de slots una segunda vez sin cambios en agendas
-    // Then el resumen indica `creados = 0`, `eliminados = 0`
-    // Then los identificadores y datos de los slots existentes no cambian
-
-    throw new Error("Not implemented");
+  it("EC-10: Franja que cruza la medianoche -> 400 VALIDACION", async () => {
+    await actuarComoRol("COORDINACION");
+    const r = await llamar(crearFranja, {
+      body: {
+        profesionalId: "x", diaSemana: "LUNES", horaInicio: "22:00", horaFin: "02:00",
+        especialidadId: "x", salaId: "x", vigenciaDesde: hoyEnAR(),
+      },
+    });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toBe("VALIDACION");
   });
 
-  it("AC-35: Unicidad de slot [FR-37]", () => {
-    // Given existe un slot de `P1` para `2026-09-14 08:00`
-    // When un proceso intenta insertar otro slot de `P1` para `2026-09-14 08:00`
-    // Then la base de datos rechaza la inserción por violación de unique constraint
-    // Then la generación lo trata como "sin cambios", no como error
+  it("EC-6: Borrar una franja elimina sus slots DISPONIBLE", async () => {
+    const { esp, prof, sala } = await agendaBase(60);
+    const lunes = proximoDia("LUNES");
+    const franja = await db.franjaAgenda.create({
+      data: {
+        profesionalId: prof.id, diaSemana: "LUNES", horaInicio: "08:00", horaFin: "10:00",
+        especialidadId: esp.id, salaId: sala.id, vigenciaDesde: new Date(`${hoyEnAR()}T00:00:00Z`),
+      },
+    });
+    await actuarComoRol("COORDINACION");
+    await llamar(generarSlotsHTTP, { body: { profesionalId: prof.id } });
+    expect(await db.slot.count({ where: { profesionalId: prof.id } })).toBeGreaterThan(0);
+    void lunes;
+    await llamar(borrarFranja, { params: { id: franja.id } });
+    expect(await db.slot.count({ where: { profesionalId: prof.id, estado: "DISPONIBLE" } })).toBe(0);
+  });
+});
 
-    throw new Error("Not implemented");
+// ───────────────────────── Excepciones ─────────────────────────
+
+describe("Excepciones de agenda", () => {
+  async function agendaConSlots() {
+    const { esp, prof, sala } = await agendaBase(60);
+    await db.franjaAgenda.create({
+      data: {
+        profesionalId: prof.id, diaSemana: "LUNES", horaInicio: "08:00", horaFin: "12:00",
+        especialidadId: esp.id, salaId: sala.id, vigenciaDesde: new Date(`${hoyEnAR()}T00:00:00Z`),
+      },
+    });
+    await actuarComoRol("COORDINACION");
+    await llamar(generarSlotsHTTP, { body: { profesionalId: prof.id } });
+    return { esp, prof, sala, lunes: proximoDia("LUNES") };
+  }
+
+  it("AC-29: Bloqueo elimina slots DISPONIBLE y conserva los ocupados como huérfanos [FR-28, FR-32, FR-39]", async () => {
+    const { prof, lunes } = await agendaConSlots();
+    const slots = await db.slot.findMany({ where: { profesionalId: prof.id, fecha: new Date(`${lunes}T00:00:00Z`) } });
+    expect(slots.length).toBeGreaterThan(0);
+    // Marcar uno como ocupado (BLOQUEADO) para verificar que se conserva huérfano.
+    await db.slot.update({ where: { id: slots[0].id }, data: { estado: "BLOQUEADO" } });
+
+    const r = await llamar(crearExcepcion, {
+      body: { profesionalId: prof.id, fecha: lunes, tipo: "BLOQUEO", motivo: "Licencia" },
+    });
+    expect(r.status).toBe(201);
+
+    const restantes = await db.slot.findMany({ where: { profesionalId: prof.id, fecha: new Date(`${lunes}T00:00:00Z`) } });
+    expect(restantes.every((s) => s.estado !== "DISPONIBLE")).toBe(true);
+    expect(restantes.find((s) => s.id === slots[0].id)?.huerfano).toBe(true);
   });
 
-  it("AC-36: No se generan slots en el pasado ni para entidades inactivas [FR-41]", () => {
-    // Given `P1` está desactivado y `P2` está activo con franja los lunes
-    // When se ejecuta la generación
-    // Then no existe ningún slot nuevo de `P1`
-    // Then no existe ningún slot con fecha anterior a hoy
-
-    throw new Error("Not implemented");
+  it("AC-30: Excepción de apertura genera slots [FR-30, FR-34]", async () => {
+    const { esp, prof, sala } = await agendaBase(60);
+    const sabado = proximoDia("SABADO");
+    await actuarComoRol("COORDINACION");
+    const r = await llamar(crearExcepcion, {
+      body: {
+        profesionalId: prof.id, fecha: sabado, tipo: "APERTURA",
+        horaInicio: "09:00", horaFin: "12:00", especialidadId: esp.id, salaId: sala.id, motivo: "Extra",
+      },
+    });
+    expect(r.status).toBe(201);
+    const slots = await db.slot.findMany({ where: { profesionalId: prof.id, fecha: new Date(`${sabado}T00:00:00Z`) } });
+    expect(slots.length).toBe(3);
+    expect(slots.every((s) => s.origen === "APERTURA")).toBe(true);
   });
 
-  it("AC-37: Generación manual devuelve resumen y queda registrada [FR-40, FR-42]", () => {
-    // Given una sesión con rol `COORDINACION`
-    // When hace `POST /api/admin/slots/generar` con `{ "profesionalId": "P1" }`
-    // Then recibe 200 con `{ "creados": <n>, "eliminados": <m>, "sinCambios": <k>, "profesionales": 1, "corridaId": "<id>" }`
-    // Then existe una fila en `CorridaGeneracion` con `disparador = "MANUAL"`, el `actorId` de la sesión y esos contadores
-
-    throw new Error("Not implemented");
+  it("AC-31: Apertura solapada con franja vigente [FR-31]", async () => {
+    const { esp, prof, sala } = await agendaBase(60);
+    const lunes = proximoDia("LUNES");
+    await db.franjaAgenda.create({
+      data: {
+        profesionalId: prof.id, diaSemana: "LUNES", horaInicio: "08:00", horaFin: "12:00",
+        especialidadId: esp.id, salaId: sala.id, vigenciaDesde: new Date(`${hoyEnAR()}T00:00:00Z`),
+      },
+    });
+    await actuarComoRol("COORDINACION");
+    const r = await llamar(crearExcepcion, {
+      body: {
+        profesionalId: prof.id, fecha: lunes, tipo: "APERTURA",
+        horaInicio: "10:00", horaFin: "13:00", especialidadId: esp.id, salaId: sala.id, motivo: "x",
+      },
+    });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toBe("APERTURA_SOLAPADA");
   });
 
-  it("AC-38: Edición de parámetros del sistema [FR-43]", () => {
-    // Given una sesión con rol `ADMIN`
-    // When hace `PATCH /api/admin/parametros` con `{ "ventana_reserva_dias": 21 }`
-    // Then recibe 200 con los parámetros actualizados
-    // Then `GET /api/admin/parametros` refleja `ventana_reserva_dias = 21`
-
-    throw new Error("Not implemented");
+  it("EC-7: Apertura con duración no múltiplo -> 400 VALIDACION", async () => {
+    const { esp, prof, sala } = await agendaBase(20);
+    const sabado = proximoDia("SABADO");
+    await actuarComoRol("COORDINACION");
+    const r = await llamar(crearExcepcion, {
+      body: {
+        profesionalId: prof.id, fecha: sabado, tipo: "APERTURA",
+        horaInicio: "09:00", horaFin: "09:30", especialidadId: esp.id, salaId: sala.id, motivo: "x",
+      },
+    });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toBe("VALIDACION");
   });
 
-  it("AC-39: Parámetro fuera de rango [FR-43]", () => {
-    // Given una sesión con rol `ADMIN`
-    // When hace `PATCH /api/admin/parametros` con `{ "antelacion_minima_horas": -1 }`
-    // Then recibe 400 con `error = "VALIDACION"`
+  it("EC-8: Bloqueo en fecha sin franja -> 201 sin efecto", async () => {
+    const { prof } = await agendaBase();
+    const sabado = proximoDia("SABADO");
+    await actuarComoRol("COORDINACION");
+    const r = await llamar(crearExcepcion, {
+      body: { profesionalId: prof.id, fecha: sabado, tipo: "BLOQUEO", motivo: "x" },
+    });
+    expect(r.status).toBe(201);
+    expect(await db.slot.count({ where: { profesionalId: prof.id } })).toBe(0);
+  });
+});
 
-    throw new Error("Not implemented");
+// ───────────────────────── Generación de slots ─────────────────────────
+
+describe("Generación de slots", () => {
+  async function conFranja(dia: string, horaInicio: string, horaFin: string, dur: number) {
+    const { esp, prof, sala } = await agendaBase(dur);
+    await db.franjaAgenda.create({
+      data: {
+        profesionalId: prof.id, diaSemana: dia as never, horaInicio, horaFin,
+        especialidadId: esp.id, salaId: sala.id, vigenciaDesde: new Date("2026-01-01T00:00:00Z"),
+      },
+    });
+    return { esp, prof, sala };
+  }
+
+  it("AC-32: Generación de slots desde una franja [FR-33..FR-36]", async () => {
+    const { prof } = await conFranja("LUNES", "08:00", "09:00", 15);
+    await actuarComoRol("COORDINACION");
+    await llamar(generarSlotsHTTP, { body: { profesionalId: prof.id } });
+
+    const lunes = proximoDia("LUNES");
+    const slots = await db.slot.findMany({
+      where: { profesionalId: prof.id, fecha: new Date(`${lunes}T00:00:00Z`) },
+      orderBy: { horaInicio: "asc" },
+    });
+    expect(slots.map((s) => s.horaInicio)).toEqual(["08:00", "08:15", "08:30", "08:45"]);
+    expect(slots.every((s) => s.estado === "DISPONIBLE" && s.origen === "FRANJA")).toBe(true);
   });
 
-  it("AC-40: Auditoría de operaciones sensibles [FR-44, FR-45]", () => {
-    // Given una sesión con rol `COORDINACION` que crea la franja `F9`
-    // When un `ADMIN` hace `GET /api/admin/auditoria?entidad=franja`
-    // Then la respuesta incluye un registro con `accion = "CREAR"`, `entidad = "franja"`, `entidadId = "F9"`, el `actorId` de Coordinación y un `timestamp` UTC
-
-    throw new Error("Not implemented");
+  it("AC-33: Resto final menor a la duración se descarta [FR-35]", async () => {
+    const { prof } = await conFranja("MARTES", "08:00", "08:50", 20);
+    await actuarComoRol("COORDINACION");
+    await llamar(generarSlotsHTTP, { body: { profesionalId: prof.id } });
+    const martes = proximoDia("MARTES");
+    const slots = await db.slot.findMany({ where: { profesionalId: prof.id, fecha: new Date(`${martes}T00:00:00Z`) } });
+    expect(slots.map((s) => s.horaInicio).sort()).toEqual(["08:00", "08:20"]);
   });
 
-  it("AC-41: Registros de auditoría inmutables [FR-46, NFR-S7]", () => {
-    // Given existe el registro de auditoría `A1`
-    // When cualquier rol hace `PATCH` o `DELETE` sobre `/api/admin/auditoria/A1`
-    // Then recibe 405 o 404 (el recurso no expone escritura)
-    // Then `A1` permanece sin cambios
-
-    throw new Error("Not implemented");
+  it("AC-34: Generación idempotente [FR-38]", async () => {
+    const { prof } = await conFranja("LUNES", "08:00", "09:00", 15);
+    await actuarComoRol("COORDINACION");
+    await llamar(generarSlotsHTTP, { body: { profesionalId: prof.id } });
+    const antes = await db.slot.findMany({ where: { profesionalId: prof.id }, orderBy: { inicioUtc: "asc" } });
+    const r = await llamar(generarSlotsHTTP, { body: { profesionalId: prof.id } });
+    expect(r.body.creados).toBe(0);
+    expect(r.body.eliminados).toBe(0);
+    const despues = await db.slot.findMany({ where: { profesionalId: prof.id }, orderBy: { inicioUtc: "asc" } });
+    expect(despues.map((s) => s.id)).toEqual(antes.map((s) => s.id));
   });
 
-  it("AC-42: Seed idempotente [FR-47, FR-48]", () => {
-    // Given una base de datos de desarrollo vacía
-    // When se ejecuta el script de seed dos veces consecutivas
-    // Then la primera corrida crea el catálogo ficticio completo (4 usuarios, ≥ 8 especialidades, 2–3 profesionales por especialidad, 15–20 categorías con ≥ 2 `derivarAGuardia`, ≥ 6 salas, ≥ 8 obras sociales, franjas para ≥ la mitad de los profesionales)
-    // Then la segunda corrida no crea duplicados ni lanza error
-    // Then ejecutar el seed con la variable de entorno de producción activa aborta sin escribir
+  it("AC-35: Unicidad de slot [FR-37]", async () => {
+    const { esp, prof, sala } = await conFranja("LUNES", "08:00", "09:00", 15);
+    const lunes = proximoDia("LUNES");
+    await db.slot.create({
+      data: {
+        profesionalId: prof.id, especialidadId: esp.id, salaId: sala.id,
+        fecha: new Date(`${lunes}T00:00:00Z`), horaInicio: "08:00", horaFin: "08:15",
+        inicioUtc: new Date(`${lunes}T11:00:00Z`), finUtc: new Date(`${lunes}T11:15:00Z`),
+        estado: "DISPONIBLE", origen: "FRANJA", origenId: "seed",
+      },
+    });
+    await actuarComoRol("COORDINACION");
+    const r = await llamar(generarSlotsHTTP, { body: { profesionalId: prof.id } });
+    expect(r.status).toBe(200);
+    const dupes = await db.slot.count({
+      where: { profesionalId: prof.id, fecha: new Date(`${lunes}T00:00:00Z`), horaInicio: "08:00" },
+    });
+    expect(dupes).toBe(1);
 
-    throw new Error("Not implemented");
+    await expect(
+      db.slot.create({
+        data: {
+          profesionalId: prof.id, especialidadId: esp.id, salaId: sala.id,
+          fecha: new Date(`${lunes}T00:00:00Z`), horaInicio: "08:00", horaFin: "08:15",
+          inicioUtc: new Date(`${lunes}T11:00:00Z`), finUtc: new Date(`${lunes}T11:15:00Z`),
+          estado: "DISPONIBLE", origen: "FRANJA", origenId: "otro",
+        },
+      }),
+    ).rejects.toThrow();
   });
 
-  it("AC-43: Transaccionalidad de la generación por profesional [NFR-R1]", () => {
-    // Given la generación de slots de `P1` falla a mitad por un error simulado de base de datos
-    // When termina la corrida
-    // Then el conjunto de slots de `P1` es idéntico al que había antes de la corrida (sin slots parciales)
-    // Then la corrida de los demás profesionales no se ve afectada
+  it("AC-36: No se generan slots en el pasado ni para inactivos [FR-41]", async () => {
+    const { prof: p1 } = await conFranja("LUNES", "08:00", "09:00", 15);
+    await db.profesional.update({ where: { id: p1.id }, data: { activo: false } });
+    const { prof: p2 } = await conFranja("LUNES", "08:00", "09:00", 15);
 
-    throw new Error("Not implemented");
+    await actuarComoRol("COORDINACION");
+    await llamar(generarSlotsHTTP, {});
+
+    expect(await db.slot.count({ where: { profesionalId: p1.id } })).toBe(0);
+    expect(await db.slot.count({ where: { profesionalId: p2.id } })).toBeGreaterThan(0);
+    const hoy = new Date(`${hoyEnAR()}T00:00:00Z`);
+    expect(await db.slot.count({ where: { fecha: { lt: hoy } } })).toBe(0);
+  });
+
+  it("AC-37: Generación manual devuelve resumen y queda registrada [FR-40, FR-42]", async () => {
+    const { prof } = await conFranja("LUNES", "08:00", "09:00", 15);
+    const actor = await actuarComoRol("COORDINACION");
+    const r = await llamar(generarSlotsHTTP, { body: { profesionalId: prof.id } });
+    expect(r.body).toMatchObject({ profesionales: 1 });
+    expect(r.body.creados).toBeGreaterThan(0);
+    expect(r.body.corridaId).toBeTypeOf("string");
+
+    const corrida = await db.corridaGeneracion.findUnique({ where: { id: r.body.corridaId } });
+    expect(corrida?.disparador).toBe("MANUAL");
+    expect(corrida?.actorId).toBe(actor.id);
+  });
+
+  it("AC-43: Transaccionalidad de la generación por profesional [NFR-R1]", async () => {
+    await conFranja("LUNES", "08:00", "09:00", 15);
+    await conFranja("MARTES", "08:00", "09:00", 15);
+
+    // La primera transacción (primer profesional) falla; el resto delega al método real.
+    fallarUnaVez(db, "$transaction", new Error("fallo simulado"));
+
+    await actuarComoRol("COORDINACION");
+    const r = await llamar(generarSlotsHTTP, {});
+    expect(r.status).toBe(200);
+
+    const conSlots = await db.profesional.findMany({ include: { _count: { select: { slots: true } } } });
+    const conAlgo = conSlots.filter((p) => p._count.slots > 0);
+    expect(conAlgo.length).toBe(1); // el que falló quedó sin slots parciales
   });
 
   it("AC-44: Cálculo de slots aislado y testeable [NFR-M2]", () => {
-    // Given un conjunto de franjas y excepciones en memoria y un rango de fechas
-    // When se invoca la función pura de cálculo de slots sin conexión a base de datos
-    // Then devuelve la lista esperada de slots (profesional, fecha, hora inicio, hora fin, origen) para ese rango
-
-    throw new Error("Not implemented");
+    const slots = calcularSlots({
+      profesionalId: "P1",
+      franjas: [
+        {
+          id: "F1", profesionalId: "P1", diaSemana: "LUNES", horaInicio: "08:00", horaFin: "09:00",
+          especialidadId: "E1", salaId: "S1", vigenciaDesde: "2026-01-01", vigenciaHasta: null,
+          activa: true, inconsistente: false,
+        },
+      ],
+      excepciones: [],
+      duracionPorEspecialidad: { E1: 15 },
+      desde: "2026-09-07", // lunes
+      hasta: "2026-09-07",
+    });
+    expect(slots.map((s) => s.horaInicio)).toEqual(["08:00", "08:15", "08:30", "08:45"]);
+    expect(slots[0]).toMatchObject({ origen: "FRANJA", fecha: "2026-09-07", horaFin: "08:15" });
   });
 
-  it("AC-45: Franjas y slots respetan zona horaria [NFR-R4]", () => {
-    // Given una franja los lunes `08:00`–`09:00` hora Argentina
-    // When se generan los slots y se consultan sus timestamps almacenados
-    // Then los timestamps están en UTC y, presentados en `America/Argentina/Buenos_Aires`, corresponden a `08:00`–`09:00` de ese lunes
-
-    throw new Error("Not implemented");
+  it("AC-45: Franjas y slots respetan la zona horaria [NFR-R4]", async () => {
+    const { prof } = await conFranja("LUNES", "08:00", "09:00", 60);
+    await actuarComoRol("COORDINACION");
+    await llamar(generarSlotsHTTP, { body: { profesionalId: prof.id } });
+    const lunes = proximoDia("LUNES");
+    const slot = await db.slot.findFirst({
+      where: { profesionalId: prof.id, fecha: new Date(`${lunes}T00:00:00Z`), horaInicio: "08:00" },
+    });
+    expect(slot?.inicioUtc.toISOString()).toBe(`${lunes}T11:00:00.000Z`);
   });
 
-  // --- Edge Cases ---
+  it("EC-12: Reducir ventana_generacion_dias elimina slots fuera de la nueva ventana", async () => {
+    const { prof } = await conFranja("LUNES", "08:00", "09:00", 60);
+    await sembrarParametros();
+    await actuarComoRol("COORDINACION");
+    await llamar(generarSlotsHTTP, { body: { profesionalId: prof.id } });
+    const total45 = await db.slot.count({ where: { profesionalId: prof.id } });
 
-  it("EC-1: Email vacío o con formato inválido en login", () => {
-    // Condition: Email vacío o con formato inválido en login
-    // Expected: 400 `VALIDACION`, no se consulta la base de credenciales
-
-    throw new Error("Not implemented");
+    await db.parametroSistema.update({ where: { clave: "ventana_generacion_dias" }, data: { valor: 10 } });
+    await llamar(generarSlotsHTTP, { body: { profesionalId: prof.id } });
+    const total10 = await db.slot.count({ where: { profesionalId: prof.id } });
+    expect(total10).toBeLessThan(total45);
+    const limite = new Date(`${sumarDias(hoyEnAR(), 10)}T00:00:00Z`);
+    expect(await db.slot.count({ where: { profesionalId: prof.id, fecha: { gt: limite } } })).toBe(0);
   });
 
-  it("EC-2: Cuerpo JSON malformado en cualquier endpoint de escritura", () => {
-    // Condition: Cuerpo JSON malformado en cualquier endpoint de escritura
-    // Expected: 400 `JSON_INVALIDO`, sin efectos secundarios
-
-    throw new Error("Not implemented");
+  it("EC-14: Corrida concurrente se saltea por el lock [NFR-R3]", async () => {
+    await db.corridaGeneracion.create({
+      data: { disparador: "JOB", estado: "OK", iniciadaAt: new Date(), finalizadaAt: null },
+    });
+    await actuarComoRol("COORDINACION");
+    const r = await llamar(generarSlotsHTTP, {});
+    const corrida = await db.corridaGeneracion.findUnique({ where: { id: r.body.corridaId } });
+    expect(corrida?.estado).toBe("SALTADA");
   });
 
-  it("EC-3: Cookie de sesión presente pero firmada/expirada/no encontrada en el store", () => {
-    // Condition: Cookie de sesión presente pero firmada/expirada/no encontrada en el store
-    // Expected: 401 `NO_AUTENTICADO`, se limpia la cookie
-
-    throw new Error("Not implemented");
+  it("EC-20: Generación sin franjas ni excepciones -> 200 creados 0", async () => {
+    await actuarComoRol("COORDINACION");
+    const r = await llamar(generarSlotsHTTP, {});
+    expect(r.status).toBe(200);
+    expect(r.body.creados).toBe(0);
   });
 
-  it("EC-4: Dos `ADMIN` crean simultáneamente una especialidad con el mismo nombre", () => {
-    // Condition: Dos `ADMIN` crean simultáneamente una especialidad con el mismo nombre
-    // Expected: la primera transacción hace 201, la segunda recibe 409 `NOMBRE_DUPLICADO` por el unique constraint
+  it("GET /slots devuelve los slots generados con filtros [FR-36]", async () => {
+    const { prof } = await conFranja("LUNES", "08:00", "09:00", 15);
+    await actuarComoRol("COORDINACION");
+    await llamar(generarSlotsHTTP, { body: { profesionalId: prof.id } });
+    const r = await llamar(listarSlots, { query: { profesionalId: prof.id, estado: "DISPONIBLE" } });
+    expect(r.status).toBe(200);
+    expect(r.body.items.length).toBeGreaterThan(0);
+    expect(r.body.items.every((s: { estado: string }) => s.estado === "DISPONIBLE")).toBe(true);
+  });
+});
 
-    throw new Error("Not implemented");
+// ───────────────────────── Parámetros ─────────────────────────
+
+describe("Parámetros del sistema", () => {
+  it("AC-38: Edición de parámetros del sistema [FR-43]", async () => {
+    await sembrarParametros();
+    await actuarComoRol("ADMIN");
+    const r = await llamar(patchParametros, { body: { ventana_reserva_dias: 21 } });
+    expect(r.status).toBe(200);
+    expect(r.body.ventana_reserva_dias).toBe(21);
+    const g = await llamar(getParametros, {});
+    expect(g.body.ventana_reserva_dias).toBe(21);
   });
 
-  it("EC-5: Pérdida de conexión a PostgreSQL durante una operación de ABM", () => {
-    // Condition: Pérdida de conexión a PostgreSQL durante una operación de ABM
-    // Expected: 503 `BASE_DE_DATOS_NO_DISPONIBLE`, la operación no se confirma, sin estado parcial
+  it("AC-39: Parámetro fuera de rango [FR-43]", async () => {
+    await actuarComoRol("ADMIN");
+    const r = await llamar(patchParametros, { body: { antelacion_minima_horas: -1 } });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toBe("VALIDACION");
+  });
+});
 
-    throw new Error("Not implemented");
+// ───────────────────────── Auditoría ─────────────────────────
+
+describe("Auditoría", () => {
+  it("AC-40: Auditoría de operaciones sensibles [FR-44, FR-45]", async () => {
+    const { esp, prof, sala } = await agendaBase(60);
+    const coord = await actuarComoRol("COORDINACION");
+    const f = await llamar(crearFranja, {
+      body: {
+        profesionalId: prof.id, diaSemana: "MIERCOLES", horaInicio: "08:00", horaFin: "12:00",
+        especialidadId: esp.id, salaId: sala.id, vigenciaDesde: hoyEnAR(),
+      },
+    });
+    expect(f.status).toBe(201);
+
+    await actuarComoRol("ADMIN");
+    const r = await llamar(getAuditoria, { query: { entidad: "franja" } });
+    const reg = r.body.items.find((a: { entidadId: string }) => a.entidadId === f.body.id);
+    expect(reg).toBeDefined();
+    expect(reg.accion).toBe("CREAR");
+    expect(reg.entidad).toBe("franja");
+    expect(reg.actorId).toBe(coord.id);
+    expect(new Date(reg.timestamp).toISOString()).toBe(reg.timestamp);
   });
 
-  it("EC-6: Se elimina una franja mientras el job de generación la está procesando", () => {
-    // Condition: Se elimina una franja mientras el job de generación la está procesando
-    // Expected: la corrida en curso puede generar slots de esa franja; la siguiente corrida (o la incremental disparada por el borrado) los elimina si siguen `DISPONIBLE`
+  it("AC-41: Registros de auditoría inmutables [FR-46, NFR-S7]", async () => {
+    const p = await llamar(patchAuditoria, { params: { id: "A1" } });
+    const d = await llamar(deleteAuditoria, { params: { id: "A1" } });
+    expect(p.status).toBe(405);
+    expect(d.status).toBe(405);
+  });
+});
 
-    throw new Error("Not implemented");
+// ───────────────────────── Usuarios: último admin ─────────────────────────
+
+describe("Reglas de usuarios", () => {
+  it("EC-16: No se puede desactivar el único ADMIN activo", async () => {
+    const admin = await crearUsuarioDB({ rol: "ADMIN" });
+    const otro = await crearUsuarioDB({ rol: "COORDINACION" });
+    actuarComo({ usuarioId: otro.id, rol: "ADMIN" }); // actúa como admin pero NO es el target
+    // Nota: para probar ULTIMO_ADMIN sin toparse con OPERACION_SOBRE_SI_MISMO,
+    // el actor debe ser distinto del target y el sistema debe quedar sin admins.
+    const r = await llamar(editarUsuario, { body: { activo: false }, params: { id: admin.id } });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toBe("ULTIMO_ADMIN");
   });
 
-  it("EC-7: Excepción de `APERTURA` cuya duración no es múltiplo de la duración de turno de la especialidad", () => {
-    // Condition: Excepción de `APERTURA` cuya duración no es múltiplo de la duración de turno de la especialidad
-    // Expected: 400 `VALIDACION`
-
-    throw new Error("Not implemented");
+  it("EC-15: Profesional vinculado a usuario que luego se desactiva sigue activo", async () => {
+    const esp = await crearEspecialidadDB();
+    const u = await crearUsuarioDB({ rol: "PROFESIONAL", email: "prof-vinc@hospital.test" });
+    const prof = await crearProfesionalDB([esp.id], { usuarioId: u.id });
+    await actuarComoRol("ADMIN");
+    await llamar(editarUsuario, { body: { activo: false }, params: { id: u.id } });
+    const p = await db.profesional.findUnique({ where: { id: prof.id } });
+    expect(p?.activo).toBe(true);
+    expect(p?.usuarioId).toBe(u.id);
   });
+});
 
-  it("EC-8: Excepción de `BLOQUEO` para una fecha en la que el profesional no tenía franja ni apertura", () => {
-    // Condition: Excepción de `BLOQUEO` para una fecha en la que el profesional no tenía franja ni apertura
-    // Expected: se acepta (201) y no tiene efecto sobre los slots
+// ───────────────────────── Seed ─────────────────────────
 
-    throw new Error("Not implemented");
+describe("Datos semilla", () => {
+  it("AC-42: Seed idempotente y guard de producción [FR-47, FR-48]", { timeout: 180_000 }, async () => {
+    const { sembrar, assertNoProd } = await import("../prisma/seed");
+
+    const c1 = await sembrar();
+    expect(c1.usuarios).toBe(4);
+    expect(c1.especialidades).toBeGreaterThanOrEqual(8);
+    expect(c1.salas).toBeGreaterThanOrEqual(6);
+    expect(c1.obrasSociales).toBeGreaterThanOrEqual(8);
+
+    const c2 = await sembrar();
+    expect(c2).toEqual(c1); // sin duplicados
+
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SEED_ALLOW_PROD", "");
+    expect(() => assertNoProd()).toThrow();
+    vi.unstubAllEnvs();
   });
-
-  it("EC-9: Franja con `vigenciaHasta` anterior a `vigenciaDesde`", () => {
-    // Condition: Franja con `vigenciaHasta` anterior a `vigenciaDesde`
-    // Expected: 400 `VALIDACION`
-
-    throw new Error("Not implemented");
-  });
-
-  it("EC-10: Franja que cruza la medianoche (`horaInicio` 22:00, `horaFin` 02:00)", () => {
-    // Condition: Franja que cruza la medianoche (`horaInicio` 22:00, `horaFin` 02:00)
-    // Expected: 400 `VALIDACION` (no se soportan franjas que cruzan de día en el MVP)
-
-    throw new Error("Not implemented");
-  });
-
-  it("EC-11: Cambio de la duración de turno de una especialidad con franjas y slots existentes", () => {
-    // Condition: Cambio de la duración de turno de una especialidad con franjas y slots existentes
-    // Expected: las franjas cuya duración deja de ser múltiplo quedan marcadas como inconsistentes y se listan; la generación no procesa esas franjas hasta corregirlas, y no borra slots ya `DISPONIBLE` de corridas previas salvo regeneración explícita
-
-    throw new Error("Not implemented");
-  });
-
-  it("EC-12: `ventana_generacion_dias` se reduce (ej. de 45 a 20)", () => {
-    // Condition: `ventana_generacion_dias` se reduce (ej. de 45 a 20)
-    // Expected: la siguiente corrida elimina los slots `DISPONIBLE` fuera de la nueva ventana; los slots en otros estados se conservan
-
-    throw new Error("Not implemented");
-  });
-
-  it("EC-14: El job programado arranca mientras otra corrida sigue activa", () => {
-    // Condition: El job programado arranca mientras otra corrida sigue activa
-    // Expected: la nueva corrida detecta el lock lógico (`NFR-R3`) y termina inmediatamente registrando "saltada por solapamiento"
-
-    throw new Error("Not implemented");
-  });
-
-  it("EC-15: Profesional vinculado a un usuario que luego se desactiva", () => {
-    // Condition: Profesional vinculado a un usuario que luego se desactiva
-    // Expected: el profesional sigue activo y sus agendas/slots no se ven afectados; solo se pierde el acceso de solo lectura de ese usuario
-
-    throw new Error("Not implemented");
-  });
-
-  it("EC-16: Se intenta desactivar el único `ADMIN` activo del sistema", () => {
-    // Condition: Se intenta desactivar el único `ADMIN` activo del sistema
-    // Expected: 409 `ULTIMO_ADMIN`, la operación se rechaza
-
-    throw new Error("Not implemented");
-  });
-
-  it("EC-17: Paginación con `page` fuera de rango o `pageSize` > 100", () => {
-    // Condition: Paginación con `page` fuera de rango o `pageSize` > 100
-    // Expected: se normaliza a límites válidos (pageSize máximo 100), respuesta 200 con lista vacía si la página excede el total
-
-    throw new Error("Not implemented");
-  });
-
-  it("EC-18: Matrícula de profesional duplicada", () => {
-    // Condition: Matrícula de profesional duplicada
-    // Expected: 409 `MATRICULA_DUPLICADA`
-
-    throw new Error("Not implemented");
-  });
-
-  it("EC-19: Mapeo categoría", () => {
-    // Condition: Mapeo categoría
-    // Expected: especialidad que referencia una especialidad inexistente o inactiva → 400 `VALIDACION` con el id ofensor en `details`
-
-    throw new Error("Not implemented");
-  });
-
-  it("EC-20: Corrida de generación sin ninguna franja ni excepción en el sistema", () => {
-    // Condition: Corrida de generación sin ninguna franja ni excepción en el sistema
-    // Expected: 200 con `creados = 0`, no es error
-
-    throw new Error("Not implemented");
-  });
-
 });
