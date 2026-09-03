@@ -1,0 +1,21 @@
+# Job programado de generación de slots (FR-39a).
+# Alternativa portable a Vercel Cron para despliegues que no corran en Vercel.
+# Requiere dos secrets de repositorio:
+#   APP_URL      — origen público de la app (ej. https://turnero.hospital.gob.ar)
+#   CRON_SECRET  — mismo valor que la env var CRON_SECRET del servidor
+name: Generar slots
+
+on:
+  schedule:
+    - cron: "0 5 * * *" # 05:00 UTC ≈ 02:00 en Argentina, diario
+  workflow_dispatch: {}
+
+jobs:
+  generar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Invocar el endpoint de generación
+        run: |
+          curl --fail --silent --show-error \
+            -X POST "${{ secrets.APP_URL }}/api/cron/generar-slots" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"

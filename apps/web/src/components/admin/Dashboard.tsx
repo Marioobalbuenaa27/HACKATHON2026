@@ -30,8 +30,11 @@ function Tarjeta({ href, label, icono }: { href: string; label: string; icono: s
 
 export function Dashboard({ actor }: { actor: Perfil }) {
   const tarjetas = NAV.filter(
-    (i) => i.seccion !== "dashboard" && puedeVer(actor.rol, i.seccion),
+    (i) =>
+      (i.grupo === "Catálogos" || i.seccion === "usuarios") &&
+      puedeVer(actor.rol, i.seccion),
   );
+  const agendas = NAV.filter((i) => i.grupo === "Agendas" && puedeVer(actor.rol, i.seccion));
 
   return (
     <div className="flex flex-col gap-space-lg">
@@ -40,16 +43,34 @@ export function Dashboard({ actor }: { actor: Perfil }) {
         descripcion={`Sesión iniciada como ${ETIQUETA_ROL[actor.rol]}.`}
       />
 
-      <section className="grid grid-cols-1 gap-space-sm sm:grid-cols-2 lg:grid-cols-3">
-        {tarjetas.map((t) => (
-          <Tarjeta key={t.href} href={t.href} label={t.label} icono={t.icono} />
-        ))}
+      <section className="flex flex-col gap-space-sm">
+        <h2 className="text-label-md uppercase tracking-wide text-on-surface-variant">Catálogos</h2>
+        <div className="grid grid-cols-1 gap-space-sm sm:grid-cols-2 lg:grid-cols-3">
+          {tarjetas.map((t) => (
+            <Tarjeta key={t.href} href={t.href} label={t.label} icono={t.icono} />
+          ))}
+        </div>
       </section>
 
-      <p className="text-body-sm text-on-surface-variant">
-        Las agendas (franjas y excepciones), la generación de slots, los parámetros del
-        sistema y la auditoría se incorporan en la próxima entrega.
-      </p>
+      {agendas.length > 0 && (
+        <section className="flex flex-col gap-space-sm">
+          <h2 className="text-label-md uppercase tracking-wide text-on-surface-variant">Agendas</h2>
+          <div className="grid grid-cols-1 gap-space-sm sm:grid-cols-2 lg:grid-cols-3">
+            {agendas.map((a) => (
+              <Link
+                key={a.href}
+                href={a.href}
+                className="flex items-center gap-space-sm rounded-xl bg-surface-container-lowest p-space-md shadow-sm transition-colors hover:bg-surface-container-low"
+              >
+                <span className="material-symbols-outlined text-[22px] text-primary" aria-hidden>
+                  {a.icono}
+                </span>
+                <span className="text-label-lg text-on-surface">{a.label}</span>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }
