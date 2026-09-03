@@ -9,7 +9,7 @@ import { ETIQUETA_ROL, type Perfil } from "@/lib/http/tipos";
 import { NAV } from "./navegacion";
 import { cn } from "@/lib/cn";
 
-const GRUPOS = ["General", "Catálogos", "Administración"] as const;
+const GRUPOS = ["General", "Catálogos", "Agendas", "Administración"] as const;
 
 export function AdminShell({
   actor,

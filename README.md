@@ -10,10 +10,20 @@ Panel administrativo + formulario ciudadano web + bot de WhatsApp, sobre un back
 
 | Fase | Descripción | Estado |
 |------|-------------|--------|
-| 1 | Núcleo administrativo | **API implementada** · 65/65 tests en verde · sin UI (route handlers `/api/admin/**`) |
+| 1 | Núcleo administrativo | **Completa** · API (`/api/admin/**`) + panel administrativo (auth, 6 ABM de catálogo, franjas/excepciones de agenda, generación de slots, parámetros, auditoría) + job diario de generación de slots · 65/65 tests en verde |
 | 2 | Operación del día | No iniciada |
 | 3 | Canal ciudadano web | No iniciada |
 | 4 | Bot de WhatsApp | Paquete base/demo listo; integración de turnos pendiente de Fases 2–3 |
+
+### Panel administrativo (Fase 1)
+
+`/admin` — login con email/contraseña (4 roles). Secciones:
+
+- **Catálogos:** especialidades, profesionales, categorías de problema (+ mapeo a especialidad), salas, obras sociales.
+- **Agendas:** franjas semanales recurrentes, excepciones (bloqueo / apertura), visor de slots generados con acción manual "Generar slots".
+- **Administración:** usuarios del panel, parámetros del sistema, auditoría (solo lectura).
+
+La visibilidad de cada sección depende del rol; la autorización real la impone la API en cada endpoint.
 
 ## Stack
 
@@ -59,6 +69,21 @@ pnpm db:seed          # carga catálogo ficticio (idempotente; no corre en produ
 
 pnpm dev              # Next.js en http://localhost:3000
 ```
+
+### Job de generación de slots (FR-39a)
+
+`POST /api/cron/generar-slots` regenera los slots de todos los profesionales. Debe
+ejecutarse al menos una vez por día. Se autentica con el header
+`Authorization: Bearer $CRON_SECRET` (generar con `openssl rand -base64 32` y
+definir la env var `CRON_SECRET` en el servidor).
+
+- **Vercel:** `apps/web/vercel.json` ya declara el cron diario (05:00 UTC). Solo
+  hace falta crear la env var `CRON_SECRET` en el proyecto; Vercel adjunta el header.
+- **Fuera de Vercel:** el workflow `.github/workflows/generar-slots.yml` hace la
+  llamada por `curl` (requiere los secrets `APP_URL` y `CRON_SECRET` en el repo), o
+  un cron de sistema equivalente.
+- La generación también es incremental: cada alta/edición/baja de franja o
+  excepción regenera los slots afectados en el momento.
 
 ### Tests
 
