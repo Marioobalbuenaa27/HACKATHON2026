@@ -10,7 +10,10 @@ export const GET = rutaAdmin(async (req) => {
   const sp = new URL(req.url).searchParams; const where: Prisma.TurnoWhereInput = {};
   if (g.actor.rol === "PROFESIONAL") where.profesionalId = g.actor.profesionalId ?? "__sin_profesional__";
   if (sp.get("fecha")) where.fecha = new Date(`${sp.get("fecha")}T00:00:00.000Z`);
-  const items = await db.turno.findMany({ where, include: { profesional: true, especialidad: true, sala: true }, orderBy: [{ prioridad: "asc" }, { horaProgramada: "asc" }, { horaLlegada: "asc" }] });
+  // Cola del día (FR-14): mayor prioridad primero. El enum PrioridadOperativa está
+  // declarado NORMAL→URGENTE, así que `desc` deja URGENTE primero. Luego hora
+  // programada, luego hora de llegada (sobreturnos / demanda espontánea), luego alta.
+  const items = await db.turno.findMany({ where, include: { profesional: true, especialidad: true, sala: true }, orderBy: [{ prioridad: "desc" }, { horaProgramada: "asc" }, { horaLlegada: "asc" }, { createdAt: "asc" }] });
   return jsonOk({ items });
 });
 export const POST = rutaAdmin(async (req) => {

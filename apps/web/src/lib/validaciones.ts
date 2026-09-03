@@ -205,12 +205,24 @@ export const generarSlotsSchema = z.object({ profesionalId: z.string().min(1).op
 const personaSchema = z.object({
   nombre: z.string().trim().min(1).max(160), dni: z.string().regex(/^\d{7,9}$/),
 });
+// FR-2: el responsable debe tener al menos un canal de contacto (email o teléfono).
+const responsableSchema = personaSchema
+  .extend({
+    vinculo: z.string().trim().min(1).max(80),
+    telefono: z.string().trim().min(1).max(32).optional(),
+    email: z.string().email().optional(),
+  })
+  .refine((r) => Boolean(r.email) || Boolean(r.telefono), {
+    message: "Se requiere un email o un teléfono de contacto.",
+    path: ["telefono"],
+  });
 export const crearTurnoSchema = z.object({
   slotId: z.string().min(1), categoriaId: z.string().min(1),
   paciente: personaSchema.extend({ fechaNacimiento: zFecha }),
-  responsable: personaSchema.extend({ vinculo: z.string().trim().min(1).max(80), telefono: z.string().trim().max(32).optional(), email: z.string().email().optional() }),
+  responsable: responsableSchema,
 });
 export const cambiarEstadoTurnoSchema = z.object({ estado: z.enum(["PRESENTE", "AUSENTE", "ATENDIDO"]) });
+export const cancelarTurnoSchema = z.object({ motivo: z.string().trim().min(1).max(280) });
 export const crearDemandaSchema = z.object({
   categoriaId: z.string().min(1),
   profesionalId: z.string().min(1),
@@ -220,7 +232,7 @@ export const crearDemandaSchema = z.object({
   motivoAjuste: z.string().trim().max(280).optional(),
   respuestas: z.record(z.string(), z.string().trim().min(1).max(500)),
   paciente: personaSchema.extend({ fechaNacimiento: zFecha }),
-  responsable: personaSchema.extend({ vinculo: z.string().trim().min(1).max(80), telefono: z.string().trim().max(32).optional(), email: z.string().email().optional() }),
+  responsable: responsableSchema,
 });
 export const crearAusenciaSchema = z.object({ profesionalId: z.string().min(1), fecha: zFecha, motivo: z.string().trim().min(1).max(280) });
 export const desplazarTurnoSchema = z.object({ slotDestinoId: z.string().min(1), motivo: z.string().trim().min(1).max(280) });

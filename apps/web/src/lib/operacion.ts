@@ -1,6 +1,6 @@
 import { type EstadoTurno, type PrioridadOperativa, type PrismaClient } from "@prisma/client";
 import { registrarAuditoria } from "@/lib/auditoria";
-import { fechaISOaDateUTC } from "@/lib/fechas";
+import { fechaHoraARaUTC, fechaISOaDateUTC } from "@/lib/fechas";
 
 export interface ActorOperacion { usuarioId: string; rol: "ADMIN" | "COORDINACION" | "RECEPCION" | "PROFESIONAL"; profesionalId: string | null; }
 export interface DatosPersona { nombre: string; dni: string; }
@@ -51,6 +51,27 @@ export async function cambiarEstadoTurno(db: PrismaClient, actor: ActorOperacion
   });
 }
 
+// FR-40, FR-41: cancelación de un turno no finalizado por el personal, con motivo.
+// El slot vuelve a DISPONIBLE si sigue en el futuro; si no, queda BLOQUEADO y no se re-ofrece.
+const CANCELABLES: EstadoTurno[] = ["CONFIRMADO", "PRESENTE", "A_REPROGRAMAR", "REPROGRAMADO_PENDIENTE_CONFIRMACION"];
+
+export async function cancelarTurno(db: PrismaClient, actor: ActorOperacion, turnoId: string, motivo: string) {
+  return db.$transaction(async (tx) => {
+    const turno = await tx.turno.findUnique({ where: { id: turnoId } });
+    if (!turno) throw new Error("TURNO_NO_ENCONTRADO");
+    if (!CANCELABLES.includes(turno.estado)) throw new Error("TRANSICION_INVALIDA");
+    const cancelado = await tx.turno.update({ where: { id: turno.id }, data: { estado: "CANCELADO" } });
+    if (turno.slotId) {
+      const slot = await tx.slot.findUnique({ where: { id: turno.slotId } });
+      const enFuturo = slot ? slot.inicioUtc.getTime() > Date.now() : false;
+      await tx.slot.update({ where: { id: turno.slotId }, data: { estado: enFuturo ? "DISPONIBLE" : "BLOQUEADO" } });
+    }
+    await tx.eventoNotificable.create({ data: { turnoId: turno.id, tipo: "CAMBIO_ESTADO_TURNO", destinatario: turno.email ?? "responsable-sin-email", payload: { estadoAnterior: turno.estado, estadoNuevo: "CANCELADO", motivo, cancelacionHospital: true } } });
+    await registrarAuditoria(tx, { actorId: actor.usuarioId, accion: "CAMBIAR_ESTADO_TURNO", entidad: "turno", entidadId: turno.id, motivo, antes: { estado: turno.estado }, despues: { estado: "CANCELADO" } });
+    return cancelado;
+  });
+}
+
 export async function registrarDemandaEspontanea(db: PrismaClient, actor: ActorOperacion, input: {
   categoriaId: string; profesionalId: string; especialidadId: string; salaId?: string; prioridadConfirmada?: PrioridadOperativa;
   motivoAjuste?: string; respuestas: Record<string, string>; paciente: DatosPersona & { fechaNacimiento: string };
@@ -73,6 +94,9 @@ export async function registrarDemandaEspontanea(db: PrismaClient, actor: ActorO
     if (!profesional?.activo || !especialidad?.activa) throw new Error("PROFESIONAL_O_ESPECIALIDAD_INVALIDO");
     const hoy = new Date();
     const inicioDia = new Date(Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth(), hoy.getUTCDate()));
+    // FR-33: no se crea un sobreturno para un profesional marcado ausente esa fecha.
+    const ausente = await tx.ausenciaProfesionalDia.findUnique({ where: { profesionalId_fecha: { profesionalId: profesional.id, fecha: inicioDia } } });
+    if (ausente) throw new Error("PROFESIONAL_AUSENTE");
     const limite = await tx.parametroSistema.findUnique({ where: { clave: "tope_sobreturnos_por_profesional_dia" } });
     const cantidad = await tx.turno.count({ where: { profesionalId: profesional.id, fecha: inicioDia, tipo: "SOBRETURNO", estado: { in: ESTADOS_ACTIVOS } } });
     const override = actor.rol === "ADMIN" || actor.rol === "COORDINACION";
@@ -100,7 +124,12 @@ export async function marcarAusenciaProfesional(db: PrismaClient, actor: ActorOp
     const profesional = await tx.profesional.findUnique({ where: { id: input.profesionalId }, include: { usuario: { select: { email: true } } } });
     if (!profesional) throw new Error("PROFESIONAL_NO_ENCONTRADO");
     const fecha = fechaISOaDateUTC(input.fecha);
+    const yaMarcada = await tx.ausenciaProfesionalDia.findUnique({ where: { profesionalId_fecha: { profesionalId: input.profesionalId, fecha } } });
+    if (yaMarcada) throw new Error("AUSENCIA_YA_REGISTRADA");
     const ausencia = await tx.ausenciaProfesionalDia.create({ data: { profesionalId: input.profesionalId, fecha, motivo: input.motivo, marcadaPorId: actor.usuarioId } });
+    // FR-19: bloquear la agenda de esa fecha para que no entren turnos nuevos.
+    await tx.excepcionAgenda.create({ data: { profesionalId: input.profesionalId, fecha, tipo: "BLOQUEO", motivo: input.motivo } });
+    await tx.slot.updateMany({ where: { profesionalId: input.profesionalId, fecha, estado: "DISPONIBLE" }, data: { estado: "BLOQUEADO" } });
     const turnos = await tx.turno.findMany({ where: { profesionalId: input.profesionalId, fecha, estado: { in: ESTADOS_ACTIVOS } } });
     for (const turno of turnos) {
       await tx.turno.update({ where: { id: turno.id }, data: { estado: "A_REPROGRAMAR" } });
@@ -119,8 +148,14 @@ export async function desplazarTurno(db: PrismaClient, actor: ActorOperacion, tu
     const destino = await tx.slot.findUnique({ where: { id: slotDestinoId } });
     if (!origen || !destino) throw new Error("TURNO_O_SLOT_NO_ENCONTRADO");
     if (origen.estado !== "CONFIRMADO" || origen.tipo === "SOBRETURNO") throw new Error("TURNO_NO_DESPLAZABLE");
+    if (origen.presenteAt) throw new Error("TURNO_NO_DESPLAZABLE"); // ya hizo check-in
     if (destino.estado !== "DISPONIBLE" || destino.profesionalId !== origen.profesionalId) throw new Error("SLOT_DESTINO_INVALIDO");
-    if (destino.inicioUtc.getTime() - Date.now() < 24 * 60 * 60 * 1000) throw new Error("MENOS_DE_24_HORAS");
+    // La ventana de 24 h protege al paciente de un cambio sin aviso: se mide sobre el
+    // horario del turno ORIGEN, no sobre el slot destino (FR-37).
+    const inicioOrigen = origen.horaProgramada
+      ? fechaHoraARaUTC(origen.fecha.toISOString().slice(0, 10), origen.horaProgramada)
+      : origen.fecha;
+    if (inicioOrigen.getTime() - Date.now() < 24 * 60 * 60 * 1000) throw new Error("MENOS_DE_24_HORAS");
     const ocupacion = await tx.slot.updateMany({ where: { id: destino.id, estado: "DISPONIBLE" }, data: { estado: "OCUPADO" } });
     if (ocupacion.count !== 1) throw new Error("SLOT_DESTINO_INVALIDO");
     const nuevo = await tx.turno.create({ data: { ...Object.fromEntries(Object.entries(origen).filter(([key]) => !["id", "slotId", "createdAt", "updatedAt", "estado", "horaProgramada", "salaId"].includes(key))), slotId: destino.id, salaId: destino.salaId, fecha: destino.fecha, horaProgramada: destino.horaInicio, estado: "REPROGRAMADO_PENDIENTE_CONFIRMACION" } as never });
@@ -157,7 +192,7 @@ export async function resolverCasoReprogramacion(db: PrismaClient, actor: ActorO
 
 export function traducirErrorOperacion(error: unknown) {
   const code = error instanceof Error ? error.message : "";
-  if (["SLOT_NO_DISPONIBLE", "CATEGORIA_NO_RESERVABLE", "TRANSICION_INVALIDA", "TOPE_SOBRETURNOS_ALCANZADO", "MOTIVO_OVERRIDE_REQUERIDO", "CATEGORIA_NO_ENCONTRADA", "PROFESIONAL_O_ESPECIALIDAD_INVALIDO", "TURNO_NO_DESPLAZABLE", "SLOT_DESTINO_INVALIDO", "MENOS_DE_24_HORAS"].includes(code)) return { status: 409, code };
+  if (["SLOT_NO_DISPONIBLE", "CATEGORIA_NO_RESERVABLE", "TRANSICION_INVALIDA", "TOPE_SOBRETURNOS_ALCANZADO", "MOTIVO_OVERRIDE_REQUERIDO", "CATEGORIA_NO_ENCONTRADA", "PROFESIONAL_O_ESPECIALIDAD_INVALIDO", "TURNO_NO_DESPLAZABLE", "SLOT_DESTINO_INVALIDO", "MENOS_DE_24_HORAS", "PROFESIONAL_AUSENTE", "AUSENCIA_YA_REGISTRADA"].includes(code)) return { status: 409, code };
   if (["PROFESIONAL_NO_ENCONTRADO", "TURNO_O_SLOT_NO_ENCONTRADO", "CASO_O_SLOT_NO_ENCONTRADO"].includes(code)) return { status: 404, code };
   if (code === "CASO_NO_PENDIENTE") return { status: 409, code };
   if (code === "TURNO_NO_ENCONTRADO") return { status: 404, code };
