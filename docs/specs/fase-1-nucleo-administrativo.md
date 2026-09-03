@@ -17,7 +17,7 @@ Esta fase no expone ninguna funcionalidad al ciudadano ni genera turnos reservab
 
 El riesgo principal que esta fase mitiga es el de rework: si el modelo de datos o el esquema de agendas/slots queda mal definido, las tres fases siguientes heredan el error. Por eso el spec fija con precisión el modelo de datos completo del MVP (aunque varias entidades solo se *usen* en fases posteriores) y la mecánica de generación de slots.
 
-Restricciones heredadas de las decisiones de MVP: Next.js App Router + TypeScript + PostgreSQL + Prisma; auth con email/contraseña y sesión en cookie httpOnly; sin Redis; español de Argentina sin i18n; panel desktop-first con responsive básico; apuntar a WCAG 2.1 AA razonable; Ley 25.326 (datos de salud de menores) — hashing de contraseñas, HTTPS, audit log de acciones desde el inicio.
+Restricciones heredadas de las decisiones de MVP: Next.js App Router + TypeScript + PostgreSQL (gestionado en Supabase) + Prisma; auth con email/contraseña y sesión en cookie httpOnly; sin Redis; español de Argentina sin i18n; panel desktop-first con responsive básico; apuntar a WCAG 2.1 AA razonable; Ley 25.326 (datos de salud de menores) — hashing de contraseñas, HTTPS, audit log de acciones desde el inicio.
 
 ---
 
@@ -96,7 +96,7 @@ Restricciones heredadas de las decisiones de MVP: Next.js App Router + TypeScrip
 ### Rendimiento
 
 - NFR-P1: Los listados de ABM MUST responder en < 400 ms (p95) con hasta 500 registros por entidad, usando paginación de 25 ítems por página.
-- NFR-P2: La generación completa de slots para 60 profesionales, ventana de 45 días y franjas de ~4 h diarias MUST completarse en < 20 s en un entorno con PostgreSQL local.
+- NFR-P2: La generación completa de slots para 60 profesionales, ventana de 45 días y franjas de ~4 h diarias MUST completarse en < 20 s contra una instancia PostgreSQL representativa de producción (Supabase, o Postgres local equivalente).
 - NFR-P3: La generación incremental tras editar una franja MUST completarse en < 2 s (p95).
 - NFR-P4: Las consultas sobre la tabla de slots MUST usar índices; no se permiten full table scans sobre slots ni auditoría con > 10.000 filas.
 
@@ -633,7 +633,7 @@ interface RegistroAuditoria {
 
 ## Data Models
 
-Motor: PostgreSQL. ORM: Prisma. Todos los `id` son `cuid()` PK autogenerados e inmutables. Todas las tablas tienen `createdAt` y `updatedAt` (`timestamptz`, UTC) salvo `auditoria` (solo `timestamp`, inmutable). Borrado: **soft delete por campo `activo`** en catálogos; **hard delete** permitido solo en `franja`, `excepcion_agenda` y `slot` (`DISPONIBLE`). Los nombres de tabla se muestran en singular conceptual; Prisma los mapea a snake_case (`@@map`).
+Motor: PostgreSQL, instancia gestionada en Supabase (Prisma se conecta vía pooler PgBouncer en runtime y vía conexión directa para migraciones). ORM: Prisma. Todos los `id` son `cuid()` PK autogenerados e inmutables. Todas las tablas tienen `createdAt` y `updatedAt` (`timestamptz`, UTC) salvo `auditoria` (solo `timestamp`, inmutable). Borrado: **soft delete por campo `activo`** en catálogos; **hard delete** permitido solo en `franja`, `excepcion_agenda` y `slot` (`DISPONIBLE`). Los nombres de tabla se muestran en singular conceptual; Prisma los mapea a snake_case (`@@map`).
 
 **Unicidad case-insensitive** (FR-24): abajo se anota `citext` de forma conceptual. La implementación usa `String @unique` de Prisma y **normaliza en la capa de aplicación** (comparación en minúsculas antes de insertar/editar); opcionalmente se refuerza con un índice único funcional sobre `lower(nombre)` vía migración SQL. Sin la extensión `citext` de Postgres para no depender de preview features de Prisma.
 

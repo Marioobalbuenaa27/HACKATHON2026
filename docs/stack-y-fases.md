@@ -16,8 +16,8 @@
 | Área | Elección |
 |------|----------|
 | Frontend + API | Next.js (App Router) + TypeScript + Tailwind CSS + shadcn/ui |
-| Base de datos | PostgreSQL |
-| ORM | Prisma (o Drizzle) |
+| Base de datos | PostgreSQL **gestionado en Supabase** (hosting de la BD; sin Docker). Acceso vía pooler (PgBouncer) en runtime y conexión directa para migraciones |
+| ORM | Prisma (`prisma migrate` + `prisma db seed` sobre la instancia de Supabase) |
 | Auth del panel | Email + contraseña, roles, sesión en cookies httpOnly (Auth.js / Lucia) |
 | Jobs programados | Scheduler simple: cron en Node que consulta la base de datos cada ~5 min. **Sin Redis** en el MVP. |
 | Cola de notificaciones | Tabla `notificaciones` con estado (pendiente / enviado / fallido) — actúa como cola persistente. |
