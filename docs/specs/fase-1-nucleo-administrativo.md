@@ -2,8 +2,8 @@
 
 **Author:** Lautaro Mateo (lautaromateol@gmail.com)
 **Date:** 2026-09-03
-**Status:** In Review
-**Reviewers:** (pendiente de asignar)
+**Status:** Approved
+**Reviewers:** Lautaro Mateo — aprobado el 2026-09-03
 **Related specs:** Fase 2 — Operación del día (pendiente), Fase 3 — Canal ciudadano web (pendiente), Fase 4 — Bot de WhatsApp (pendiente)
 **Documentos base:** [vision-producto.md](../vision-producto.md), [decisiones-mvp.md](../decisiones-mvp.md), [stack-y-fases.md](../stack-y-fases.md)
 
@@ -166,7 +166,7 @@ When se hace un 6º `POST /api/admin/auth/login` con ese email
 Then recibe 429 con `error = "DEMASIADOS_INTENTOS"`
 And no se evalúan las credenciales
 
-### AC-7: Alta de usuario por ADMIN (FR-8, FR-5)
+### AC-7: Alta de usuario por ADMIN y reset de contraseña (FR-8, FR-5, FR-12)
 Given una sesión con rol `ADMIN`
 When hace `POST /api/admin/usuarios` con nombre, email nuevo y rol `RECEPCION`
 Then recibe 201 con el usuario creado (sin contraseña ni hash)
@@ -178,11 +178,12 @@ When hace `PATCH /api/admin/usuarios/U1` con `{ "activo": false }`
 Then recibe 409 con `error = "OPERACION_SOBRE_SI_MISMO"`
 And su cuenta sigue activa
 
-### AC-9: Desactivar cuenta cierra su sesión (FR-11, NFR-S4)
+### AC-9: Desactivar cuenta cierra su sesión y no borra el usuario (FR-9, FR-11, NFR-S4)
 Given el usuario `U2` tiene una sesión activa
 When un `ADMIN` hace `PATCH /api/admin/usuarios/U2` con `{ "activo": false }`
 Then la siguiente petición autenticada de `U2` recibe 401
 And `U2` no puede volver a iniciar sesión
+And el registro de `U2` sigue existiendo (no hay endpoint de hard delete de usuarios)
 
 ### AC-10: Logout invalida la sesión (FR-11)
 Given una sesión válida
@@ -230,7 +231,7 @@ Given existen la categoría `C1` y las especialidades `E1` y `E2`
 When un `ADMIN` hace `PUT /api/admin/categorias/C1/especialidades` con `[{ "especialidadId": "E1" }, { "especialidadId": "E2", "nota": "Si además hay fiebre" }]`
 Then recibe 200 y la categoría `C1` queda mapeada a `E1` y `E2` con la nota en `E2`
 
-### AC-19: Categoría "derivar a guardia" no admite mapeos (FR-18)
+### AC-19: Categoría marcada 'derivar a guardia' no admite mapeos (FR-18)
 Given la categoría `C2` tiene `derivarAGuardia = true`
 When se hace `PUT /api/admin/categorias/C2/especialidades` con `[{ "especialidadId": "E1" }]`
 Then recibe 409 con `error = "CATEGORIA_DERIVA_A_GUARDIA"`
@@ -281,11 +282,12 @@ Given `P1` tiene una franja activa los lunes `08:00`–`12:00` vigente todo el a
 When se hace `POST /api/admin/franjas` para `P1` los lunes `11:00`–`13:00` con vigencia solapada
 Then recibe 409 con `error = "FRANJA_SOLAPADA"` y `details.franjaId` de la franja en conflicto
 
-### AC-29: Excepción de bloqueo (FR-29, FR-32)
+### AC-29: Excepción de bloqueo elimina slots y dispara regeneración incremental (FR-28, FR-29, FR-32, FR-39)
 Given `P1` tiene franja los lunes `08:00`–`12:00` y hay slots generados para el lunes `2026-09-14`
 When un `COORDINACION` hace `POST /api/admin/excepciones` con `{ "profesionalId": "P1", "fecha": "2026-09-14", "tipo": "BLOQUEO", "motivo": "Licencia" }`
 Then recibe 201
-And tras la regeneración incremental, los slots `DISPONIBLE` de `P1` del `2026-09-14` quedan eliminados
+And se dispara automáticamente la regeneración incremental de `P1` para las fechas afectadas
+And los slots `DISPONIBLE` de `P1` del `2026-09-14` quedan eliminados; un slot en cualquier otro estado se conserva marcado `huerfano`
 
 ### AC-30: Excepción de apertura (FR-30, FR-34)
 Given `P1` no tiene franja los sábados
@@ -326,10 +328,11 @@ When se ejecuta la generación
 Then no existe ningún slot nuevo de `P1`
 And no existe ningún slot con fecha anterior a hoy
 
-### AC-37: Generación manual devuelve resumen (FR-40)
+### AC-37: Generación manual devuelve resumen y queda registrada (FR-40, FR-42)
 Given una sesión con rol `COORDINACION`
 When hace `POST /api/admin/slots/generar` con `{ "profesionalId": "P1" }`
-Then recibe 200 con `{ "creados": <n>, "eliminados": <m>, "sinCambios": <k>, "profesionales": 1 }`
+Then recibe 200 con `{ "creados": <n>, "eliminados": <m>, "sinCambios": <k>, "profesionales": 1, "corridaId": "<id>" }`
+And existe una fila en `CorridaGeneracion` con `disparador = "MANUAL"`, el `actorId` de la sesión y esos contadores
 
 ### AC-38: Edición de parámetros del sistema (FR-43)
 Given una sesión con rol `ADMIN`
@@ -435,15 +438,17 @@ Nota: Coordinación no administra usuarios del panel; esa área es exclusiva de 
 
 ### Autenticación
 
+Implementada sobre **Auth.js (NextAuth v5)**, provider Credentials, estrategia JWT (ver Data Models → "Sesión"). Los paths siguientes son route handlers propios que envuelven `signIn` / `signOut` de NextAuth, para mantener el contrato estable y aplicar el rate-limiting propio. La cookie se llama `authjs.session-token` (`__Secure-` prefix en HTTPS).
+
 ```typescript
 // POST /api/admin/auth/login        (público, rate-limited)
 interface LoginRequest { email: string; password: string; } // email válido; password 1..128
 interface LoginResponse { usuarioId: string; nombre: string; rol: Rol; }
-// 200 + Set-Cookie: sesion=...; HttpOnly; Secure; SameSite=Lax; Max-Age=28800
+// 200 + Set-Cookie: authjs.session-token=<JWT>; HttpOnly; Secure; SameSite=Lax; Max-Age=28800
 // 400 VALIDACION | 401 CREDENCIALES_INVALIDAS | 429 DEMASIADOS_INTENTOS
 
 // POST /api/admin/auth/logout       (autenticado)
-// 204, elimina la cookie e invalida la sesión server-side
+// 204, borra la cookie de sesión (signOut). El token deja de aceptarse en la siguiente request.
 
 // GET  /api/admin/auth/me           (autenticado)
 interface MeResponse { usuarioId: string; nombre: string; email: string; rol: Rol; profesionalId: string | null; }
@@ -628,7 +633,9 @@ interface RegistroAuditoria {
 
 ## Data Models
 
-Motor: PostgreSQL. ORM: Prisma. Todos los `id` son `uuid` (o `cuid`) PK autogenerados e inmutables. Todas las tablas tienen `createdAt` y `updatedAt` (`timestamptz`, UTC) salvo `auditoria` (solo `timestamp`, inmutable). Borrado: **soft delete por campo `activo`** en catálogos; **hard delete** permitido solo en `franja`, `excepcion_agenda` y `slot` (`DISPONIBLE`). Los nombres de tabla se muestran en singular conceptual; Prisma los mapea a snake_case plural.
+Motor: PostgreSQL. ORM: Prisma. Todos los `id` son `cuid()` PK autogenerados e inmutables. Todas las tablas tienen `createdAt` y `updatedAt` (`timestamptz`, UTC) salvo `auditoria` (solo `timestamp`, inmutable). Borrado: **soft delete por campo `activo`** en catálogos; **hard delete** permitido solo en `franja`, `excepcion_agenda` y `slot` (`DISPONIBLE`). Los nombres de tabla se muestran en singular conceptual; Prisma los mapea a snake_case (`@@map`).
+
+**Unicidad case-insensitive** (FR-24): abajo se anota `citext` de forma conceptual. La implementación usa `String @unique` de Prisma y **normaliza en la capa de aplicación** (comparación en minúsculas antes de insertar/editar); opcionalmente se refuerza con un índice único funcional sobre `lower(nombre)` vía migración SQL. Sin la extensión `citext` de Postgres para no depender de preview features de Prisma.
 
 ### Usuario
 | Field | Type | Constraints |
@@ -644,15 +651,13 @@ Motor: PostgreSQL. ORM: Prisma. Todos los `id` son `uuid` (o `cuid`) PK autogene
 
 Índices: `email` (unique). Regla: siempre ≥ 1 usuario `ADMIN` con `activo = true` (validada en aplicación, EC-16).
 
-### Sesion
-| Field | Type | Constraints |
-|-------|------|-------------|
-| id | varchar(64) | PK, token opaco aleatorio |
-| usuarioId | uuid | FK → Usuario, not null, on delete cascade |
-| expiresAt | timestamptz | not null |
-| createdAt | timestamptz | UTC |
+### Sesión (sin tabla — Auth.js / NextAuth v5, estrategia JWT)
 
-Índices: `usuarioId`, `expiresAt`. Job de limpieza elimina sesiones vencidas. (Si se usa Auth.js/Lucia, esta tabla la define el adaptador; el contrato es equivalente.)
+**Decisión de implementación (2026-09-03):** el panel usa **Auth.js (NextAuth v5)** con el provider **Credentials**, que obliga a estrategia de sesión **JWT** (no hay tabla de sesión en la base). La cookie de sesión es el JWT firmado con `AUTH_SECRET`, `httpOnly` + `Secure` + `SameSite=Lax`, `maxAge` 8 h.
+
+Para cumplir FR-11 / NFR-S4 (invalidación server-side al desactivar la cuenta o cambiar la contraseña) **sin** sesión en base, el callback `jwt` de NextAuth **revalida contra la base en cada request**: recarga el `Usuario` por id y rechaza el token (fuerza re-login) si `usuario.activo === false` o si `usuario.passwordActualizadaAt` es posterior al `iat` del token. El logout (FR-11) borra la cookie. Efecto observable idéntico al de una sesión en base: a la siguiente request el token deja de funcionar.
+
+No se usa el `@auth/prisma-adapter` (el adapter solo aplica a estrategia `database`, incompatible con Credentials).
 
 ### Especialidad
 | Field | Type | Constraints |
@@ -846,3 +851,5 @@ Sin `updatedAt`. Sin operaciones de UPDATE/DELETE (permiso revocado a nivel apli
 | FR-14 | AC-14, AC-15 | FR-30 | AC-30 | FR-46 | AC-41 |
 | FR-15 | AC-16 | FR-31 | AC-31 | FR-47 | AC-42 |
 | FR-16 | AC-17 | FR-32 | AC-29 | FR-48 | AC-42 |
+
+Cobertura NFR: NFR-S1↔AC-4, NFR-S2↔AC-6, NFR-S4↔AC-9, NFR-S7↔AC-5/AC-41, NFR-R1↔AC-43, NFR-M2↔AC-44, NFR-R4↔AC-45. NFR-P1..P4, NFR-S3/S5/S6, NFR-A1..A3, NFR-R2/R3, NFR-M1 se verifican por prueba de carga / revisión / auditoría de accesibilidad, no por AC funcional.
