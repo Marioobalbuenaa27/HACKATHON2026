@@ -1,0 +1,335 @@
+// Esquema de datos — Turnero JP, Fase 1 (Núcleo administrativo).
+// Contrato: docs/specs/fase-1-nucleo-administrativo.md (sección Data Models).
+//
+// Convenciones:
+// - id: cuid() PK inmutable.
+// - createdAt / updatedAt en todas las tablas salvo Auditoria (solo timestamp, inmutable).
+// - Borrado: soft delete por campo `activo` en catálogos; hard delete permitido solo
+//   en FranjaAgenda, ExcepcionAgenda y Slot (estado DISPONIBLE).
+// - Unicidad case-insensitive de nombres: se normaliza en la capa de aplicación
+//   (lower-case en la comparación de escritura) + índice único simple aquí.
+// - Timestamps en UTC; presentación en America/Argentina/Buenos_Aires.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Rol {
+  ADMIN
+  COORDINACION
+  RECEPCION
+  PROFESIONAL
+}
+
+enum PrioridadBase {
+  NORMAL
+  PREFERENCIAL
+  PRIORITARIO
+}
+
+enum DiaSemana {
+  LUNES
+  MARTES
+  MIERCOLES
+  JUEVES
+  VIERNES
+  SABADO
+  DOMINGO
+}
+
+enum TipoExcepcion {
+  BLOQUEO
+  APERTURA
+}
+
+enum EstadoSlot {
+  DISPONIBLE
+  BLOQUEADO
+  // Fase 2/3 añaden RESERVADO_TEMPORAL, OCUPADO
+}
+
+enum OrigenSlot {
+  FRANJA
+  APERTURA
+}
+
+enum DisparadorCorrida {
+  JOB
+  MANUAL
+  INCREMENTAL
+}
+
+enum EstadoCorrida {
+  OK
+  SALTADA
+  ERROR
+}
+
+enum AccionAuditada {
+  CREAR
+  EDITAR
+  ELIMINAR
+  DESACTIVAR
+  ACTIVAR
+  RESET_PASSWORD
+}
+
+enum EntidadAuditada {
+  usuario
+  franja
+  excepcion
+  parametros
+}
+
+/// Personal del panel. El ciudadano no tiene cuenta (fuera de Fase 1).
+model Usuario {
+  id                    String   @id @default(cuid())
+  nombre                String
+  email                 String   @unique
+  passwordHash          String
+  rol                   Rol
+  activo                Boolean  @default(true)
+  passwordActualizadaAt DateTime @default(now())
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  profesional      Profesional?
+  corridasLanzadas CorridaGeneracion[]
+  accionesAuditadas Auditoria[]
+
+  @@index([rol])
+  @@map("usuario")
+}
+
+model Especialidad {
+  id               String   @id @default(cuid())
+  nombre           String   @unique
+  duracionTurnoMin Int // 5..120, múltiplo de 5 (validado en app)
+  activa           Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  profesionales ProfesionalEspecialidad[]
+  categorias    CategoriaEspecialidad[]
+  franjas       FranjaAgenda[]
+  excepciones   ExcepcionAgenda[]
+  slots         Slot[]
+
+  @@map("especialidad")
+}
+
+model Profesional {
+  id        String   @id @default(cuid())
+  nombre    String
+  apellido  String
+  matricula String   @unique
+  usuarioId String?  @unique
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  usuario       Usuario?                  @relation(fields: [usuarioId], references: [id])
+  especialidades ProfesionalEspecialidad[]
+  franjas       FranjaAgenda[]
+  excepciones   ExcepcionAgenda[]
+  slots         Slot[]
+
+  @@map("profesional")
+}
+
+model ProfesionalEspecialidad {
+  profesionalId  String
+  especialidadId String
+
+  profesional  Profesional  @relation(fields: [profesionalId], references: [id], onDelete: Cascade)
+  especialidad Especialidad @relation(fields: [especialidadId], references: [id], onDelete: Cascade)
+
+  @@id([profesionalId, especialidadId])
+  @@index([especialidadId])
+  @@map("profesional_especialidad")
+}
+
+model CategoriaProblema {
+  id              String        @id @default(cuid())
+  nombre          String        @unique
+  ayuda           String?
+  prioridadBase   PrioridadBase @default(NORMAL)
+  derivarAGuardia Boolean       @default(false)
+  orden           Int           @default(0)
+  activa          Boolean       @default(true)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  especialidades CategoriaEspecialidad[]
+
+  @@index([orden])
+  @@map("categoria_problema")
+}
+
+model CategoriaEspecialidad {
+  categoriaId    String
+  especialidadId String
+  nota           String? @db.VarChar(280)
+
+  categoria    CategoriaProblema @relation(fields: [categoriaId], references: [id], onDelete: Cascade)
+  especialidad Especialidad      @relation(fields: [especialidadId], references: [id], onDelete: Cascade)
+
+  @@id([categoriaId, especialidadId])
+  @@index([especialidadId])
+  @@map("categoria_especialidad")
+}
+
+model Sala {
+  id            String   @id @default(cuid())
+  identificador String   @unique
+  ubicacion     String?
+  activa        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  franjas     FranjaAgenda[]
+  excepciones ExcepcionAgenda[]
+  slots       Slot[]
+
+  @@map("sala")
+}
+
+model ObraSocial {
+  id        String   @id @default(cuid())
+  nombre    String   @unique
+  activa    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("obra_social")
+}
+
+/// Franja horaria semanal recurrente de la agenda de un profesional.
+model FranjaAgenda {
+  id             String    @id @default(cuid())
+  profesionalId  String
+  diaSemana      DiaSemana
+  horaInicio     String // "HH:MM" 24h, mismo día
+  horaFin        String
+  especialidadId String
+  salaId         String
+  vigenciaDesde  DateTime  @db.Date
+  vigenciaHasta  DateTime? @db.Date
+  activa         Boolean   @default(true)
+  inconsistente  Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  profesional  Profesional  @relation(fields: [profesionalId], references: [id])
+  especialidad Especialidad @relation(fields: [especialidadId], references: [id])
+  sala         Sala         @relation(fields: [salaId], references: [id])
+
+  @@index([profesionalId, diaSemana])
+  @@index([profesionalId, activa])
+  @@map("franja_agenda")
+}
+
+/// Excepción puntual: BLOQUEO (no atiende) o APERTURA (atiende fuera de franja).
+model ExcepcionAgenda {
+  id             String        @id @default(cuid())
+  profesionalId  String
+  fecha          DateTime      @db.Date
+  tipo           TipoExcepcion
+  horaInicio     String? // null => bloqueo de día completo; obligatorio si APERTURA
+  horaFin        String?
+  especialidadId String? // obligatorio si APERTURA
+  salaId         String?
+  motivo         String        @db.VarChar(280)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  profesional  Profesional   @relation(fields: [profesionalId], references: [id])
+  especialidad Especialidad? @relation(fields: [especialidadId], references: [id])
+  sala         Sala?         @relation(fields: [salaId], references: [id])
+
+  @@index([profesionalId, fecha])
+  @@map("excepcion_agenda")
+}
+
+/// Slot atómico generado a partir de franjas/excepciones. Sobre él operan Fase 2 y 3.
+model Slot {
+  id             String     @id @default(cuid())
+  profesionalId  String
+  especialidadId String
+  salaId         String
+  fecha          DateTime   @db.Date
+  horaInicio     String
+  horaFin        String
+  inicioUtc      DateTime
+  finUtc         DateTime
+  estado         EstadoSlot @default(DISPONIBLE)
+  origen         OrigenSlot
+  origenId       String
+  huerfano       Boolean    @default(false)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  profesional  Profesional  @relation(fields: [profesionalId], references: [id])
+  especialidad Especialidad @relation(fields: [especialidadId], references: [id])
+  sala         Sala         @relation(fields: [salaId], references: [id])
+  // `origenId` es polimórfico (FranjaAgenda | ExcepcionAgenda según `origen`).
+  // Prisma no soporta relaciones polimórficas: se resuelve en la capa de aplicación.
+
+  @@unique([profesionalId, fecha, horaInicio], name: "slot_unico_por_profesional")
+  @@index([profesionalId, fecha])
+  @@index([fecha, estado])
+  @@index([origen, origenId])
+  @@map("slot")
+}
+
+/// Parámetros del sistema. Filas fijas, solo se edita `valor`.
+model ParametroSistema {
+  clave     String   @id
+  valor     Int
+  updatedAt DateTime @updatedAt
+
+  @@map("parametro_sistema")
+}
+
+model CorridaGeneracion {
+  id            String            @id @default(cuid())
+  disparador    DisparadorCorrida
+  actorId       String?
+  profesionalId String? // null => todos
+  creados       Int               @default(0)
+  eliminados    Int               @default(0)
+  sinCambios    Int               @default(0)
+  estado        EstadoCorrida
+  detalle       String?
+  iniciadaAt    DateTime          @default(now())
+  finalizadaAt  DateTime?
+
+  actor Usuario? @relation(fields: [actorId], references: [id])
+
+  @@index([iniciadaAt])
+  @@map("corrida_generacion")
+}
+
+/// Log de auditoría inmutable. Sin UPDATE ni DELETE desde la aplicación.
+model Auditoria {
+  id        String          @id @default(cuid())
+  actorId   String
+  accion    AccionAuditada
+  entidad   EntidadAuditada
+  entidadId String
+  motivo    String?         @db.VarChar(280)
+  antes     Json?
+  despues   Json?
+  timestamp DateTime        @default(now())
+
+  actor Usuario @relation(fields: [actorId], references: [id])
+
+  @@index([entidad, timestamp])
+  @@index([actorId, timestamp])
+  @@map("auditoria")
+}
