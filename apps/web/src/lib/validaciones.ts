@@ -201,6 +201,31 @@ export const crearExcepcionSchema = z
 // --- Slots ---
 export const generarSlotsSchema = z.object({ profesionalId: z.string().min(1).optional() });
 
+// --- Operación del día (Fase 2) ---
+const personaSchema = z.object({
+  nombre: z.string().trim().min(1).max(160), dni: z.string().regex(/^\d{7,9}$/),
+});
+export const crearTurnoSchema = z.object({
+  slotId: z.string().min(1), categoriaId: z.string().min(1),
+  paciente: personaSchema.extend({ fechaNacimiento: zFecha }),
+  responsable: personaSchema.extend({ vinculo: z.string().trim().min(1).max(80), telefono: z.string().trim().max(32).optional(), email: z.string().email().optional() }),
+});
+export const cambiarEstadoTurnoSchema = z.object({ estado: z.enum(["PRESENTE", "AUSENTE", "ATENDIDO"]) });
+export const crearDemandaSchema = z.object({
+  categoriaId: z.string().min(1),
+  profesionalId: z.string().min(1),
+  especialidadId: z.string().min(1),
+  salaId: z.string().min(1).optional(),
+  prioridadConfirmada: z.enum(["NORMAL", "PREFERENCIAL", "PRIORITARIO", "URGENTE"]).optional(),
+  motivoAjuste: z.string().trim().max(280).optional(),
+  respuestas: z.record(z.string(), z.string().trim().min(1).max(500)),
+  paciente: personaSchema.extend({ fechaNacimiento: zFecha }),
+  responsable: personaSchema.extend({ vinculo: z.string().trim().min(1).max(80), telefono: z.string().trim().max(32).optional(), email: z.string().email().optional() }),
+});
+export const crearAusenciaSchema = z.object({ profesionalId: z.string().min(1), fecha: zFecha, motivo: z.string().trim().min(1).max(280) });
+export const desplazarTurnoSchema = z.object({ slotDestinoId: z.string().min(1), motivo: z.string().trim().min(1).max(280) });
+export const resolverCasoSchema = z.object({ slotDestinoId: z.string().min(1), motivo: z.string().trim().min(1).max(280) });
+
 // --- Parámetros ---
 export const PARAMETRO_RANGOS = {
   ventana_reserva_dias: [1, 90],
@@ -208,6 +233,7 @@ export const PARAMETRO_RANGOS = {
   reserva_temporal_minutos: [1, 30],
   ventana_generacion_dias: [7, 120],
   retencion_datos_meses: [1, 120],
+  tope_sobreturnos_por_profesional_dia: [0, 10],
 } as const;
 
 export const editarParametrosSchema = z

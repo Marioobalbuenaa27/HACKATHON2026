@@ -56,7 +56,48 @@ enum TipoExcepcion {
 enum EstadoSlot {
   DISPONIBLE
   BLOQUEADO
+  OCUPADO
   // Fase 2/3 añaden RESERVADO_TEMPORAL, OCUPADO
+}
+
+enum PrioridadOperativa {
+  NORMAL
+  PREFERENCIAL
+  PRIORITARIO
+  URGENTE
+}
+
+enum EstadoTurno {
+  CONFIRMADO
+  PRESENTE
+  AUSENTE
+  ATENDIDO
+  CANCELADO
+  A_REPROGRAMAR
+  REPROGRAMADO_PENDIENTE_CONFIRMACION
+}
+
+enum TipoTurno {
+  NORMAL
+  SOBRETURNO
+}
+
+enum EstadoCasoReprogramacion {
+  PENDIENTE
+  RESUELTO
+}
+
+enum TipoEventoNotificable {
+  REPROGRAMACION_INICIADA
+  TURNO_REPROGRAMADO
+  SOBRETURNO_CREADO
+  CAMBIO_ESTADO_TURNO
+}
+
+enum EstadoEventoNotificable {
+  PENDIENTE
+  ENTREGADO
+  FALLIDO
 }
 
 enum OrigenSlot {
@@ -83,6 +124,12 @@ enum AccionAuditada {
   DESACTIVAR
   ACTIVAR
   RESET_PASSWORD
+  CREAR_TURNO
+  CAMBIAR_ESTADO_TURNO
+  CREAR_SOBRETURNO
+  OVERRIDE_SOBRETURNO
+  MARCAR_AUSENCIA_PROFESIONAL
+  REPROGRAMAR_TURNO
 }
 
 enum EntidadAuditada {
@@ -90,6 +137,10 @@ enum EntidadAuditada {
   franja
   excepcion
   parametros
+  turno
+  demanda_espontanea
+  ausencia_profesional
+  caso_reprogramacion
 }
 
 /// Personal del panel. El ciudadano no tiene cuenta (fuera de Fase 1).
@@ -107,6 +158,7 @@ model Usuario {
   profesional      Profesional?
   corridasLanzadas CorridaGeneracion[]
   accionesAuditadas Auditoria[]
+  ausenciasMarcadas AusenciaProfesionalDia[] @relation("ausencia_marcada_por")
 
   @@index([rol])
   @@map("usuario")
@@ -125,6 +177,7 @@ model Especialidad {
   franjas       FranjaAgenda[]
   excepciones   ExcepcionAgenda[]
   slots         Slot[]
+  turnos        Turno[]
 
   @@map("especialidad")
 }
@@ -144,6 +197,8 @@ model Profesional {
   franjas       FranjaAgenda[]
   excepciones   ExcepcionAgenda[]
   slots         Slot[]
+  turnos        Turno[]
+  ausenciasDia  AusenciaProfesionalDia[]
 
   @@map("profesional")
 }
@@ -172,6 +227,8 @@ model CategoriaProblema {
   updatedAt       DateTime      @updatedAt
 
   especialidades CategoriaEspecialidad[]
+  turnos         Turno[]
+  demandas       DemandaEspontanea[]
 
   @@index([orden])
   @@map("categoria_problema")
@@ -201,6 +258,7 @@ model Sala {
   franjas     FranjaAgenda[]
   excepciones ExcepcionAgenda[]
   slots       Slot[]
+  turnos      Turno[]
 
   @@map("sala")
 }
@@ -283,6 +341,7 @@ model Slot {
   profesional  Profesional  @relation(fields: [profesionalId], references: [id])
   especialidad Especialidad @relation(fields: [especialidadId], references: [id])
   sala         Sala         @relation(fields: [salaId], references: [id])
+  turno        Turno?
   // `origenId` es polimórfico (FranjaAgenda | ExcepcionAgenda según `origen`).
   // Prisma no soporta relaciones polimórficas: se resuelve en la capa de aplicación.
 
@@ -291,6 +350,118 @@ model Slot {
   @@index([fecha, estado])
   @@index([origen, origenId])
   @@map("slot")
+}
+
+/// Turno operativo creado por personal del hospital o por futuros canales ciudadanos.
+model Turno {
+  id                    String             @id @default(cuid())
+  slotId                String?            @unique
+  profesionalId         String
+  especialidadId        String
+  salaId                String?
+  categoriaId           String
+  fecha                 DateTime           @db.Date
+  horaProgramada        String?
+  horaLlegada           DateTime?
+  tipo                  TipoTurno          @default(NORMAL)
+  prioridad             PrioridadOperativa @default(NORMAL)
+  estado                EstadoTurno        @default(CONFIRMADO)
+  pacienteNombre        String             @db.VarChar(160)
+  pacienteDni           String             @db.VarChar(16)
+  pacienteNacimiento    DateTime           @db.Date
+  responsableNombre     String             @db.VarChar(160)
+  responsableDni        String?            @db.VarChar(16)
+  responsableVinculo    String             @db.VarChar(80)
+  telefono              String?            @db.VarChar(32)
+  email                 String?            @db.VarChar(254)
+  presenteAt            DateTime?
+  ausenteAt             DateTime?
+  atendidoAt            DateTime?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  slot          Slot?               @relation(fields: [slotId], references: [id])
+  profesional   Profesional          @relation(fields: [profesionalId], references: [id])
+  especialidad  Especialidad         @relation(fields: [especialidadId], references: [id])
+  sala          Sala?                @relation(fields: [salaId], references: [id])
+  categoria     CategoriaProblema    @relation(fields: [categoriaId], references: [id])
+  demanda       DemandaEspontanea?
+  casosOrigen   CasoReprogramacion[] @relation("turno_origen")
+  casosDestino  CasoReprogramacion[] @relation("turno_destino")
+  eventos       EventoNotificable[]
+
+  @@index([fecha, estado])
+  @@index([profesionalId, fecha])
+  @@index([pacienteDni, especialidadId, estado])
+  @@map("turno")
+}
+
+model DemandaEspontanea {
+  id                  String             @id @default(cuid())
+  turnoId             String?            @unique
+  categoriaId         String
+  prioridadSugerida   PrioridadOperativa
+  prioridadConfirmada PrioridadOperativa
+  respuestas          Json
+  motivoAjuste        String?            @db.VarChar(280)
+  derivadaAGuardia    Boolean            @default(false)
+  horaLlegada         DateTime           @default(now())
+  createdAt           DateTime           @default(now())
+
+  turno     Turno?             @relation(fields: [turnoId], references: [id])
+  categoria CategoriaProblema @relation(fields: [categoriaId], references: [id])
+
+  @@index([horaLlegada])
+  @@index([prioridadConfirmada])
+  @@map("demanda_espontanea")
+}
+
+model AusenciaProfesionalDia {
+  id            String   @id @default(cuid())
+  profesionalId String
+  fecha         DateTime @db.Date
+  motivo        String   @db.VarChar(280)
+  marcadaPorId  String
+  createdAt     DateTime @default(now())
+
+  profesional Profesional @relation(fields: [profesionalId], references: [id])
+  marcadaPor  Usuario     @relation("ausencia_marcada_por", fields: [marcadaPorId], references: [id])
+
+  @@unique([profesionalId, fecha])
+  @@map("ausencia_profesional_dia")
+}
+
+model CasoReprogramacion {
+  id             String                   @id @default(cuid())
+  turnoOrigenId  String
+  turnoDestinoId String?                  @unique
+  estado         EstadoCasoReprogramacion @default(PENDIENTE)
+  motivo         String                   @db.VarChar(280)
+  resueltoPorId  String?
+  createdAt      DateTime                 @default(now())
+  resueltoAt     DateTime?
+
+  turnoOrigen  Turno  @relation("turno_origen", fields: [turnoOrigenId], references: [id])
+  turnoDestino Turno? @relation("turno_destino", fields: [turnoDestinoId], references: [id])
+
+  @@index([estado])
+  @@map("caso_reprogramacion")
+}
+
+model EventoNotificable {
+  id           String                   @id @default(cuid())
+  turnoId      String
+  tipo         TipoEventoNotificable
+  destinatario String                   @db.VarChar(254)
+  payload      Json
+  estado       EstadoEventoNotificable @default(PENDIENTE)
+  createdAt    DateTime                 @default(now())
+  procesadoAt  DateTime?
+
+  turno Turno @relation(fields: [turnoId], references: [id])
+
+  @@index([estado, createdAt])
+  @@map("evento_notificable")
 }
 
 /// Parámetros del sistema. Filas fijas, solo se edita `valor`.

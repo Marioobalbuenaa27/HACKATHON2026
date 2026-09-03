@@ -92,9 +92,9 @@ export function parseBool(v: string | null): boolean {
  * internos (NFR-S6). Traduce fallos de conexión de Prisma a 503 (EC-5).
  */
 export function rutaAdmin(
-  handler: (req: Request, ctx: { params: Promise<Record<string, string>> }) => Promise<NextResponse>,
+  handler: (req: Request, ctx: { params: Promise<Record<string, string>> }) => Promise<Response>,
 ) {
-  return async (req: Request, ctx: { params: Promise<Record<string, string>> }): Promise<NextResponse> => {
+  return async (req: Request, ctx: { params: Promise<Record<string, string>> }): Promise<Response> => {
     try {
       return await handler(req, ctx);
     } catch (e) {

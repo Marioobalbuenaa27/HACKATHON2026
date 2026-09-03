@@ -1,0 +1,31 @@
+import { jsonError, jsonOk, leerJson, rutaAdmin } from "@/lib/api";
+import { db } from "@/lib/db";
+import { marcarAusenciaProfesional, traducirErrorOperacion } from "@/lib/operacion";
+import { esGuardaFallida, exigirRoles } from "@/lib/sesion";
+import { crearAusenciaSchema } from "@/lib/validaciones";
+
+export const POST = rutaAdmin(async (req) => {
+  const g = await exigirRoles("ADMIN", "COORDINACION");
+  if (esGuardaFallida(g)) return g.response;
+  const parsed = await leerJson(req, crearAusenciaSchema);
+  if (!parsed.ok) return parsed.response;
+  try {
+    return jsonOk(await marcarAusenciaProfesional(db, g.actor, parsed.data), 201);
+  } catch (error) {
+    const op = traducirErrorOperacion(error);
+    if (op) return jsonError(op.status, op.code, "No se pudo marcar la ausencia.");
+    throw error;
+  }
+});
+
+export const GET = rutaAdmin(async (req) => {
+  const g = await exigirRoles("ADMIN", "COORDINACION", "RECEPCION");
+  if (esGuardaFallida(g)) return g.response;
+  const fecha = new URL(req.url).searchParams.get("fecha");
+  const items = await db.ausenciaProfesionalDia.findMany({
+    where: fecha ? { fecha: new Date(`${fecha}T00:00:00.000Z`) } : undefined,
+    include: { profesional: true },
+    orderBy: { fecha: "desc" },
+  });
+  return jsonOk({ items });
+});
