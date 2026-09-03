@@ -16,7 +16,7 @@ export default function Home() {
 
         <nav className="flex flex-col gap-space-xs">
           <Link
-            href="/admin"
+            href="/admin/login"
             className="flex items-center justify-between rounded-xl bg-surface-container-lowest p-space-md shadow-sm transition-colors hover:bg-surface-container-low"
           >
             <span className="flex items-center gap-space-sm">
