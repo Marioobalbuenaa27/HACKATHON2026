@@ -272,7 +272,28 @@ model ObraSocial {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  pacientes Paciente[]
+
   @@map("obra_social")
+}
+
+/// Ficha canónica del paciente, identificada por DNI (FR-1, FR-5).
+/// Los campos paciente* de `Turno` se conservan como snapshot del turno.
+model Paciente {
+  id                String      @id @default(cuid())
+  dni               String      @unique @db.VarChar(16)
+  nombre            String      @db.VarChar(160)
+  fechaNacimiento   DateTime    @db.Date
+  obraSocialId      String?
+  obraSocialOtra    String?     @db.VarChar(120)
+  contadorAusencias Int         @default(0)
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  obraSocial ObraSocial? @relation(fields: [obraSocialId], references: [id])
+  turnos     Turno[]
+
+  @@map("paciente")
 }
 
 /// Franja horaria semanal recurrente de la agenda de un profesional.
@@ -361,6 +382,7 @@ model Slot {
 model Turno {
   id                    String             @id @default(cuid())
   slotId                String?            @unique
+  pacienteId            String?
   profesionalId         String
   especialidadId        String
   salaId                String?
@@ -388,6 +410,7 @@ model Turno {
   updatedAt             DateTime           @updatedAt
 
   slot          Slot?               @relation(fields: [slotId], references: [id])
+  paciente      Paciente?           @relation(fields: [pacienteId], references: [id])
   profesional   Profesional          @relation(fields: [profesionalId], references: [id])
   especialidad  Especialidad         @relation(fields: [especialidadId], references: [id])
   sala          Sala?                @relation(fields: [salaId], references: [id])
@@ -399,6 +422,7 @@ model Turno {
 
   @@index([fecha, estado])
   @@index([profesionalId, fecha])
+  @@index([pacienteId])
   @@index([pacienteDni, especialidadId, estado])
   @@map("turno")
 }

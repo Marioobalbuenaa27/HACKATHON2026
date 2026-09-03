@@ -1,9 +1,19 @@
-import { type EstadoTurno, type PrioridadOperativa, type PrismaClient } from "@prisma/client";
+import { Prisma, type EstadoTurno, type PrioridadOperativa, type PrismaClient } from "@prisma/client";
 import { registrarAuditoria } from "@/lib/auditoria";
 import { fechaHoraARaUTC, fechaISOaDateUTC } from "@/lib/fechas";
 
 export interface ActorOperacion { usuarioId: string; rol: "ADMIN" | "COORDINACION" | "RECEPCION" | "PROFESIONAL"; profesionalId: string | null; }
 export interface DatosPersona { nombre: string; dni: string; }
+
+/** Ficha canónica del paciente por DNI (FR-1). Crea o actualiza nombre/nacimiento. */
+async function upsertPaciente(tx: Prisma.TransactionClient, p: { nombre: string; dni: string; fechaNacimiento: string }) {
+  const fechaNacimiento = fechaISOaDateUTC(p.fechaNacimiento);
+  return tx.paciente.upsert({
+    where: { dni: p.dni },
+    update: { nombre: p.nombre, fechaNacimiento },
+    create: { dni: p.dni, nombre: p.nombre, fechaNacimiento },
+  });
+}
 const ESTADOS_ACTIVOS: EstadoTurno[] = ["CONFIRMADO", "PRESENTE", "A_REPROGRAMAR", "REPROGRAMADO_PENDIENTE_CONFIRMACION"];
 
 function destinatarioProfesional(profesional: { usuario?: { email: string } | null }, id: string) {
@@ -21,8 +31,9 @@ export async function crearTurnoInterno(db: PrismaClient, actor: ActorOperacion,
     if (!categoria || categoria.derivarAGuardia) throw new Error("CATEGORIA_NO_RESERVABLE");
     const ocupacion = await tx.slot.updateMany({ where: { id: slot.id, estado: "DISPONIBLE" }, data: { estado: "OCUPADO" } });
     if (ocupacion.count !== 1) throw new Error("SLOT_NO_DISPONIBLE");
+    const paciente = await upsertPaciente(tx, input.paciente);
     const turno = await tx.turno.create({ data: {
-      slotId: slot.id, profesionalId: slot.profesionalId, especialidadId: slot.especialidadId, salaId: slot.salaId,
+      slotId: slot.id, pacienteId: paciente.id, profesionalId: slot.profesionalId, especialidadId: slot.especialidadId, salaId: slot.salaId,
       categoriaId: categoria.id, fecha: slot.fecha, horaProgramada: slot.horaInicio, prioridad: categoria.prioridadBase as PrioridadOperativa,
       pacienteNombre: input.paciente.nombre, pacienteDni: input.paciente.dni, pacienteNacimiento: fechaISOaDateUTC(input.paciente.fechaNacimiento),
       responsableNombre: input.responsable.nombre, responsableDni: input.responsable.dni, responsableVinculo: input.responsable.vinculo,
@@ -45,6 +56,10 @@ export async function cambiarEstadoTurno(db: PrismaClient, actor: ActorOperacion
     if (!SIGUIENTES[turno.estado].includes(estado)) throw new Error("TRANSICION_INVALIDA");
     const ahora = new Date();
     const actualizado = await tx.turno.update({ where: { id: turno.id }, data: { estado, presenteAt: estado === "PRESENTE" ? ahora : undefined, ausenteAt: estado === "AUSENTE" ? ahora : undefined, atendidoAt: estado === "ATENDIDO" ? ahora : undefined } });
+    // FR-5 / NFR-R5: el contador de ausencias del paciente sigue a sus turnos AUSENTE.
+    if (estado === "AUSENTE" && turno.pacienteId) {
+      await tx.paciente.update({ where: { id: turno.pacienteId }, data: { contadorAusencias: { increment: 1 } } });
+    }
     await tx.eventoNotificable.create({ data: { turnoId: turno.id, tipo: "CAMBIO_ESTADO_TURNO", destinatario: turno.email ?? "responsable-sin-email", payload: { estadoAnterior: turno.estado, estadoNuevo: estado } } });
     await registrarAuditoria(tx, { actorId: actor.usuarioId, accion: "CAMBIAR_ESTADO_TURNO", entidad: "turno", entidadId: turno.id, antes: { estado: turno.estado }, despues: { estado } });
     return actualizado;
@@ -103,7 +118,9 @@ export async function registrarDemandaEspontanea(db: PrismaClient, actor: ActorO
     const tope = limite?.valor ?? 2;
     if (cantidad >= tope && !override) throw new Error("TOPE_SOBRETURNOS_ALCANZADO");
     if (cantidad >= tope && !input.motivoAjuste) throw new Error("MOTIVO_OVERRIDE_REQUERIDO");
+    const paciente = await upsertPaciente(tx, input.paciente);
     const turno = await tx.turno.create({ data: {
+      pacienteId: paciente.id,
       profesionalId: profesional.id, especialidadId: especialidad.id, salaId: input.salaId ?? null, categoriaId: categoria.id, fecha: inicioDia,
       horaLlegada: hoy, tipo: "SOBRETURNO", prioridad, pacienteNombre: input.paciente.nombre, pacienteDni: input.paciente.dni,
       pacienteNacimiento: fechaISOaDateUTC(input.paciente.fechaNacimiento), responsableNombre: input.responsable.nombre,
@@ -155,7 +172,9 @@ export async function desplazarTurno(db: PrismaClient, actor: ActorOperacion, tu
     const inicioOrigen = origen.horaProgramada
       ? fechaHoraARaUTC(origen.fecha.toISOString().slice(0, 10), origen.horaProgramada)
       : origen.fecha;
-    if (inicioOrigen.getTime() - Date.now() < 24 * 60 * 60 * 1000) throw new Error("MENOS_DE_24_HORAS");
+    const ventanaParam = await tx.parametroSistema.findUnique({ where: { clave: "ventana_desplazamiento_horas" } });
+    const ventanaHoras = ventanaParam?.valor ?? 24;
+    if (inicioOrigen.getTime() - Date.now() < ventanaHoras * 60 * 60 * 1000) throw new Error("MENOS_DE_24_HORAS");
     const ocupacion = await tx.slot.updateMany({ where: { id: destino.id, estado: "DISPONIBLE" }, data: { estado: "OCUPADO" } });
     if (ocupacion.count !== 1) throw new Error("SLOT_DESTINO_INVALIDO");
     const nuevo = await tx.turno.create({ data: { ...Object.fromEntries(Object.entries(origen).filter(([key]) => !["id", "slotId", "createdAt", "updatedAt", "estado", "horaProgramada", "salaId"].includes(key))), slotId: destino.id, salaId: destino.salaId, fecha: destino.fecha, horaProgramada: destino.horaInicio, estado: "REPROGRAMADO_PENDIENTE_CONFIRMACION" } as never });
@@ -177,7 +196,7 @@ export async function resolverCasoReprogramacion(db: PrismaClient, actor: ActorO
     const ocupacion = await tx.slot.updateMany({ where: { id: destino.id, estado: "DISPONIBLE" }, data: { estado: "OCUPADO" } });
     if (ocupacion.count !== 1) throw new Error("SLOT_DESTINO_INVALIDO");
     const nuevo = await tx.turno.create({ data: {
-      slotId: destino.id, profesionalId: destino.profesionalId, especialidadId: destino.especialidadId, salaId: destino.salaId,
+      slotId: destino.id, pacienteId: caso.turnoOrigen.pacienteId, profesionalId: destino.profesionalId, especialidadId: destino.especialidadId, salaId: destino.salaId,
       categoriaId: caso.turnoOrigen.categoriaId, fecha: destino.fecha, horaProgramada: destino.horaInicio, tipo: caso.turnoOrigen.tipo,
       prioridad: caso.turnoOrigen.prioridad, estado: "REPROGRAMADO_PENDIENTE_CONFIRMACION", pacienteNombre: caso.turnoOrigen.pacienteNombre,
       pacienteDni: caso.turnoOrigen.pacienteDni, pacienteNacimiento: caso.turnoOrigen.pacienteNacimiento, responsableNombre: caso.turnoOrigen.responsableNombre,

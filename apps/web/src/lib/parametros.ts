@@ -8,6 +8,7 @@ export const PARAMETROS_DEFAULT = {
   ventana_generacion_dias: 45,
   retencion_datos_meses: 12,
   tope_sobreturnos_por_profesional_dia: 2,
+  ventana_desplazamiento_horas: 24,
 } as const;
 
 export type ClaveParametro = keyof typeof PARAMETROS_DEFAULT;
@@ -21,4 +22,5 @@ export const PARAMETROS_RANGO: Record<ClaveParametro, { min: number; max: number
   ventana_generacion_dias: { min: 7, max: 120 },
   retencion_datos_meses: { min: 1, max: 120 },
   tope_sobreturnos_por_profesional_dia: { min: 0, max: 10 },
+  ventana_desplazamiento_horas: { min: 0, max: 168 },
 };

@@ -38,8 +38,13 @@ export async function confirmarReserva(db: PrismaClient, token: string) {
   return db.$transaction(async (tx) => {
     const reserva = await tx.reservaTemporal.findUnique({ where: { token }, include: { slot: true } });
     if (!reserva || reserva.expiraAt <= new Date() || reserva.slot.estado !== "RESERVADO_TEMPORAL") throw new Error("RESERVA_EXPIRADA");
+    const paciente = await tx.paciente.upsert({
+      where: { dni: reserva.pacienteDni },
+      update: { nombre: reserva.pacienteNombre, fechaNacimiento: reserva.pacienteNacimiento },
+      create: { dni: reserva.pacienteDni, nombre: reserva.pacienteNombre, fechaNacimiento: reserva.pacienteNacimiento },
+    });
     const turno = await tx.turno.create({ data: {
-      slotId: reserva.slotId, profesionalId: reserva.slot.profesionalId, especialidadId: reserva.slot.especialidadId, salaId: reserva.slot.salaId,
+      slotId: reserva.slotId, pacienteId: paciente.id, profesionalId: reserva.slot.profesionalId, especialidadId: reserva.slot.especialidadId, salaId: reserva.slot.salaId,
       categoriaId: reserva.categoriaId, fecha: reserva.slot.fecha, horaProgramada: reserva.slot.horaInicio,
       pacienteNombre: reserva.pacienteNombre, pacienteDni: reserva.pacienteDni, pacienteNacimiento: reserva.pacienteNacimiento,
       responsableNombre: reserva.responsableNombre, responsableDni: reserva.responsableDni, responsableVinculo: reserva.responsableVinculo,

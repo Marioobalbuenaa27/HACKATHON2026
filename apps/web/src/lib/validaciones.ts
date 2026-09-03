@@ -263,6 +263,7 @@ export const PARAMETRO_RANGOS = {
   ventana_generacion_dias: [7, 120],
   retencion_datos_meses: [1, 120],
   tope_sobreturnos_por_profesional_dia: [0, 10],
+  ventana_desplazamiento_horas: [0, 168],
 } as const;
 
 export const editarParametrosSchema = z
